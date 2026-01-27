@@ -2,6 +2,9 @@
 
 import { useState, useRef } from "react";
 import { useImageCache } from "../../contexts/ImageCacheContext";
+import { IconButton } from "../IconButton";
+import { ImageThumbnail } from "../ImageThumbnail";
+import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 
 interface ImageUploadInputProps {
   inProgress: boolean;
@@ -148,23 +151,16 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
   return (
     <div className="flex flex-col w-full border-t border-[#3c3c3c] bg-[#1e1e1e]">
       {images.length > 0 && (
-        <div className="flex gap-2 p-2 flex-wrap border-b border-[#3c3c3c]">
-                  {images.map((image, index) => (
-                    <div key={image.id} className="relative group">
-                      <img
-                        src={image.preview}
-                        alt={image.file.name}
-                        className="h-20 w-20 object-cover rounded border border-[#3c3c3c]"
-                      />
-                      <button
-                        onClick={() => removeImage(index)}
-                        disabled={uploading}
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-[#e74c3c] text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
+        <div className="flex gap-2 p-3 flex-wrap border-b border-[#3c3c3c]">
+          {images.map((image, index) => (
+            <ImageThumbnail
+              key={image.id}
+              src={image.preview}
+              alt={image.file.name}
+              onRemove={() => removeImage(index)}
+              disabled={uploading}
+            />
+          ))}
         </div>
       )}
 
@@ -197,53 +193,26 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
           disabled={inProgress || uploading}
         />
 
-        <button
+        <IconButton
           onClick={() => fileInputRef.current?.click()}
           disabled={inProgress || uploading}
-          className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-[#3c3c3c] bg-[#252526] hover:bg-[#2d2d2d] hover:border-[#525252] transition-colors text-[#888888] hover:text-[#cccccc] disabled:opacity-50 disabled:cursor-not-allowed"
           title="Upload image"
         >
-          <svg
-            className="w-5 h-5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <polyline points="21 15 16 10 5 21" />
-          </svg>
-        </button>
+          <ImageIcon />
+        </IconButton>
 
         {inProgress && onStop ? (
-          <button
-            onClick={onStop}
-            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[#e74c3c] hover:bg-[#c0392b] transition-colors text-white"
-            title="Stop generation"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="1" />
-            </svg>
-          </button>
+          <IconButton onClick={onStop} variant="danger" title="Stop generation">
+            <StopIcon />
+          </IconButton>
         ) : (
-          <button
+          <IconButton
             onClick={handleSubmit}
             disabled={(!message.trim() && images.length === 0) || inProgress || uploading}
-            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-[#3c3c3c] bg-[#252526] hover:bg-[#2d2d2d] hover:border-[#525252] transition-colors text-[#888888] hover:text-[#cccccc] disabled:opacity-50 disabled:cursor-not-allowed"
             title="Send message"
           >
-            <svg
-              className="w-5 h-5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="M22 2L11 13" />
-              <path d="M22 2L15 22L11 13L2 9L22 2Z" />
-            </svg>
-          </button>
+            <SendIcon />
+          </IconButton>
         )}
 
         {isDragging && (

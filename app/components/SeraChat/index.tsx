@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import type { AssistantMessageProps, UserMessageProps } from "@copilotkit/react-ui";
 import { ThinkingMessage } from "../ThinkingMessage";
 import { ImageUploadInput } from "../ImageUploadInput";
+import { ImageThumbnail } from "../ImageThumbnail";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 
 const darkTheme: CSSProperties = {
@@ -45,12 +46,7 @@ function CustomUserMessage({ message }: UserMessageProps) {
           {imageIds.map((id) => {
             const cached = getImage(id);
             return cached ? (
-              <img
-                key={id}
-                src={cached.preview}
-                alt="Uploaded"
-                className="max-w-[200px] max-h-[200px] object-cover rounded"
-              />
+              <ImageThumbnail key={id} src={cached.preview} alt="Uploaded" size="lg" />
             ) : null;
           })}
         </div>

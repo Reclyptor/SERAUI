@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Markdown } from "@copilotkit/react-ui";
+import { ChevronIcon } from "../Icons";
 
 interface ThinkingMessageProps {
   content: string;
@@ -60,9 +61,9 @@ export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
 
   return (
     <div className="space-y-4">
-      <details open={ isOpen } onToggle={ (e) => setIsOpen(e.currentTarget.open) } className="mb-4">
+      <details open={isOpen} onToggle={(e) => setIsOpen(e.currentTarget.open)} className="mb-4">
         <summary className="flex items-center gap-1.5 py-1 cursor-pointer text-[11px] font-medium text-[#666666] hover:text-[#888888] transition-colors select-none list-none">
-          <span className="inline-flex items-center justify-center w-2.5 h-2.5 text-[9px] leading-none transition-transform -mt-px" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }}>▸</span>
+          <ChevronIcon isOpen={isOpen} className="w-2.5 h-2.5 -mt-px" />
           <span className="leading-none">{label}</span>
         </summary>
         <div 
