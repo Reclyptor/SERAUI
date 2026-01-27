@@ -2,8 +2,10 @@
 
 import { CopilotChat } from "@copilotkit/react-ui";
 import type { CSSProperties } from "react";
-import type { AssistantMessageProps } from "@copilotkit/react-ui";
+import type { AssistantMessageProps, UserMessageProps } from "@copilotkit/react-ui";
 import { ThinkingMessage } from "../ThinkingMessage";
+import { ImageUploadInput } from "../ImageUploadInput";
+import { useImageCache } from "../../contexts/ImageCacheContext";
 
 const darkTheme: CSSProperties = {
   "--copilot-kit-primary-color": "#3c3c3c",
@@ -28,6 +30,36 @@ function CustomAssistantMessage(props: AssistantMessageProps) {
   );
 }
 
+function CustomUserMessage({ message }: UserMessageProps) {
+  const content = message?.content || "";
+  const { getImage } = useImageCache();
+  
+  const imageIdRegex = /\[IMG:([a-f0-9-]+)\]/g;
+  const imageIds = Array.from(content.matchAll(imageIdRegex)).map(m => m[1]);
+  const cleanText = content.replace(imageIdRegex, '').trim();
+  
+  return (
+    <div className="copilotKitMessage copilotKitUserMessage">
+      {imageIds.length > 0 && (
+        <div className="flex gap-2 flex-wrap mb-2">
+          {imageIds.map((id) => {
+            const cached = getImage(id);
+            return cached ? (
+              <img
+                key={id}
+                src={cached.preview}
+                alt="Uploaded"
+                className="max-w-[200px] max-h-[200px] object-cover rounded"
+              />
+            ) : null;
+          })}
+        </div>
+      )}
+      {cleanText}
+    </div>
+  );
+}
+
 export function SeraChat() {
   return (
     <div className="flex h-full w-full flex-col" style={darkTheme}>
@@ -40,6 +72,8 @@ export function SeraChat() {
           placeholder: "Ask SERA anything...",
         }}
         AssistantMessage={CustomAssistantMessage}
+        UserMessage={CustomUserMessage}
+        Input={ImageUploadInput}
       />
     </div>
   );
