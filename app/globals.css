@@ -7,8 +7,8 @@
   --color-foreground: #cccccc;
   --color-foreground-muted: #6e6e6e;
   --color-border: #3c3c3c;
-  --color-accent: #a855f7;
-  --color-accent-hover: #9333ea;
+  --color-accent: #3c3c3c;
+  --color-accent-hover: #4a4a4a;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -34,62 +34,4 @@
 
 *::-webkit-scrollbar-thumb:hover {
   background: #6e6e6e;
-}
-
-/* CopilotKit overrides for Cursor-like theme */
-.copilotKitChat {
-  background: #1e1e1e !important;
-  border: none !important;
-}
-
-.copilotKitHeader {
-  background: #252526 !important;
-  border-bottom: 1px solid #3c3c3c !important;
-  color: #cccccc !important;
-}
-
-.copilotKitMessages {
-  background: #1e1e1e !important;
-}
-
-.copilotKitMessage {
-  background: #2d2d2d !important;
-  color: #cccccc !important;
-  border-radius: 8px !important;
-}
-
-.copilotKitUserMessage {
-  background: #3c3c3c !important;
-  color: #cccccc !important;
-}
-
-.copilotKitInput {
-  background: #2d2d2d !important;
-  border: 1px solid #3c3c3c !important;
-  color: #cccccc !important;
-  border-radius: 8px !important;
-}
-
-.copilotKitInput:focus {
-  border-color: #a855f7 !important;
-  outline: none !important;
-}
-
-.copilotKitInput::placeholder {
-  color: #6e6e6e !important;
-}
-
-.copilotKitInputContainer {
-  background: #252526 !important;
-  border-top: 1px solid #3c3c3c !important;
-}
-
-.copilotKitButton {
-  background: #a855f7 !important;
-  color: white !important;
-  border-radius: 6px !important;
-}
-
-.copilotKitButton:hover {
-  background: #9333ea !important;
 }
