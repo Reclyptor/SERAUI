@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import clsx from "clsx";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import { IconButton } from "../IconButton";
 import { ImageThumbnail } from "../ImageThumbnail";
@@ -149,25 +150,12 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
   };
 
   return (
-    <div className="flex flex-col w-full border-t border-[#3c3c3c] bg-[#1e1e1e]">
-      {images.length > 0 && (
-        <div className="flex gap-2 p-3 flex-wrap border-b border-[#3c3c3c]">
-          {images.map((image, index) => (
-            <ImageThumbnail
-              key={image.id}
-              src={image.preview}
-              alt={image.file.name}
-              onRemove={() => removeImage(index)}
-              disabled={uploading}
-            />
-          ))}
-        </div>
-      )}
-
+    <div className="flex flex-col w-full p-4 bg-background items-center">
       <div
-        className={`relative flex items-end gap-3 p-3 transition-colors ${
-          isDragging ? "bg-[#2d2d2d] border-2 border-dashed border-[#666666]" : ""
-        }`}
+        className={clsx(
+          "relative flex flex-col w-full max-w-[672px] bg-background-secondary rounded-3xl transition-colors",
+          isDragging && "ring-2 ring-dashed ring-accent"
+        )}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -181,43 +169,65 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
           onChange={(e) => handleFiles(e.target.files)}
         />
 
+        {images.length > 0 && (
+          <div className="flex gap-2 px-4 pt-4 flex-wrap">
+            {images.map((image, index) => (
+              <ImageThumbnail
+                key={image.id}
+                src={image.preview}
+                alt={image.file.name}
+                onRemove={() => removeImage(index)}
+                disabled={uploading}
+              />
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
-          placeholder={isDragging ? "Drop images here..." : uploading ? "Uploading images..." : "Ask SERA anything..."}
-          className="flex-1 bg-[#252526] text-[#cccccc] text-sm rounded-lg px-4 py-2.5 resize-none outline-none border border-[#3c3c3c] focus:border-[#525252] placeholder-[#6e6e6e] min-h-[40px] max-h-[200px]"
+          placeholder={isDragging ? "Drop images here..." : uploading ? "Uploading images..." : "Reply..."}
+          className="flex-1 bg-transparent text-foreground text-sm px-4 pt-4 pb-2 resize-none outline-none placeholder-foreground-muted min-h-[24px] max-h-[200px]"
           rows={1}
           disabled={inProgress || uploading}
         />
 
-        <IconButton
-          onClick={() => fileInputRef.current?.click()}
-          disabled={inProgress || uploading}
-          title="Upload image"
-        >
-          <ImageIcon />
-        </IconButton>
+        <div className="flex items-center justify-between px-3 pb-3">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={inProgress || uploading}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors disabled:opacity-50"
+              title="Upload image"
+            >
+              <ImageIcon className="w-5 h-5" />
+            </button>
+          </div>
 
-        {inProgress && onStop ? (
-          <IconButton onClick={onStop} variant="danger" title="Stop generation">
-            <StopIcon />
-          </IconButton>
-        ) : (
-          <IconButton
-            onClick={handleSubmit}
-            disabled={(!message.trim() && images.length === 0) || inProgress || uploading}
-            title="Send message"
-          >
-            <SendIcon />
-          </IconButton>
-        )}
+          <div className="flex items-center gap-2">
+            {inProgress && onStop ? (
+              <IconButton onClick={onStop} variant="danger" title="Stop generation">
+                <StopIcon />
+              </IconButton>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={(!message.trim() && images.length === 0) || inProgress || uploading}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-background transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Send message"
+              >
+                <SendIcon className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
 
         {isDragging && (
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-[#2d2d2d] bg-opacity-80 rounded">
-            <div className="text-[#cccccc] text-sm font-medium">
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-background-tertiary/90 rounded-3xl">
+            <div className="text-foreground text-sm font-medium">
               Drop images here
             </div>
           </div>

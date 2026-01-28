@@ -11,11 +11,12 @@ export function ImageIcon({ className = "w-5 h-5" }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <polyline points="21 15 16 10 5 21" />
+      <path d="M12 5V19" />
+      <path d="M5 12H19" />
     </svg>
   );
 }
@@ -27,10 +28,12 @@ export function SendIcon({ className = "w-5 h-5" }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      <path d="M22 2L11 13" />
-      <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+      <path d="M12 19V5" />
+      <path d="M5 12L12 5L19 12" />
     </svg>
   );
 }

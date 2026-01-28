@@ -14,12 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sera",
-  description: "AI-powered assistant",
+  title: "SERA",
+  description: "AI Assistant",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1e1e1e",
+  themeColor: "#1a1915",
 };
 
 export default function RootLayout({
@@ -30,7 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#1e1e1e] text-[#cccccc]`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         <CopilotKitProvider>{children}</CopilotKitProvider>
       </body>

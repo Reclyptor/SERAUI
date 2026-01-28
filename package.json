@@ -12,6 +12,8 @@
     "@copilotkit/react-core": "^1.51.2",
     "@copilotkit/react-ui": "^1.51.2",
     "@copilotkit/runtime": "^1.51.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.563.0",
     "next": "16.1.3",
     "react": "19.2.3",
     "react-dom": "19.2.3"

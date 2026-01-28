@@ -52,6 +52,16 @@ export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
   }, [content, isThinkingComplete]);
 
   if (!thinking) {
+    if (!content && isLoading) {
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1.5 py-1 text-[11px] font-medium text-foreground-muted select-none">
+            <ChevronIcon isOpen={true} className="w-2.5 h-2.5 -mt-px" />
+            <span className="leading-none animate-pulse">Thinking...</span>
+          </div>
+        </div>
+      );
+    }
     return <Markdown content={content} />;
   }
 
@@ -62,13 +72,13 @@ export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
   return (
     <div className="space-y-4">
       <details open={isOpen} onToggle={(e) => setIsOpen(e.currentTarget.open)} className="mb-4">
-        <summary className="flex items-center gap-1.5 py-1 cursor-pointer text-[11px] font-medium text-[#666666] hover:text-[#888888] transition-colors select-none list-none">
+        <summary className="flex items-center gap-1.5 py-1 cursor-pointer text-[11px] font-medium text-foreground-muted hover:text-foreground transition-colors select-none list-none">
           <ChevronIcon isOpen={isOpen} className="w-2.5 h-2.5 -mt-px" />
-          <span className="leading-none">{label}</span>
+          <span className={`leading-none ${!isThinkingComplete ? 'animate-pulse' : ''}`}>{label}</span>
         </summary>
         <div 
           ref={scrollRef}
-          className="mt-2 p-4 h-[100px] text-[11px] text-[#999999] font-mono leading-relaxed bg-[#252526] border border-[#3c3c3c] rounded-md overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words"
+          className="mt-2 p-4 h-[100px] text-[11px] text-foreground-muted font-mono leading-relaxed bg-background-secondary border border-border rounded-md overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words"
         >
           {thinking}
         </div>

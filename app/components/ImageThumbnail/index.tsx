@@ -1,5 +1,7 @@
 "use client";
 
+import clsx from "clsx";
+
 interface ImageThumbnailProps {
   src: string;
   alt?: string;
@@ -26,7 +28,7 @@ export function ImageThumbnail({
       <img
         src={src}
         alt={alt}
-        className={`${sizeStyles[size]} object-cover rounded border border-[#3c3c3c]`}
+        className={clsx(sizeStyles[size], "object-cover rounded border border-border")}
       />
       {onRemove && (
         <button
