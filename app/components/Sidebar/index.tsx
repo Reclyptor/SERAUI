@@ -13,6 +13,7 @@ import {
   Code,
   ChevronUp,
 } from "lucide-react";
+import { useUser } from "@/app/hooks/useUser";
 
 interface Chat {
   id: string;
@@ -153,6 +154,8 @@ function SidebarContent({
   onSelectChat?: (id: string) => void;
   currentChatId?: string | null;
 }) {
+  const { name: userName, initials: userInitials } = useUser();
+
   return (
     <>
       {/* Header */}
@@ -263,18 +266,18 @@ function SidebarContent({
             "flex items-center gap-3 rounded-lg transition-colors hover:bg-background-tertiary",
             isCollapsed ? "w-8 h-8 justify-center" : "w-full h-8 pl-1.5 pr-3"
           )}
+          title={ isCollapsed ? userName : undefined }
         >
           <div className="w-5 h-5 rounded-full bg-foreground-muted flex items-center justify-center text-background text-xs font-medium shrink-0">
-            U
+            { userInitials }
           </div>
           {!isCollapsed && (
             <>
               <div className="flex-1 min-w-0 text-left">
                 <div className="text-sm font-medium text-foreground truncate">
-                  User
+                  { userName }
                 </div>
               </div>
-              <ChevronUp className="w-4 h-4 text-foreground-muted shrink-0" />
             </>
           )}
         </button>
