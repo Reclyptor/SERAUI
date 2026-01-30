@@ -1,0 +1,51 @@
+# Dependencies
+node_modules
+
+# Build output
+.next
+out
+build
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.sublime-workspace
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Tests
+coverage
+.nyc_output
+
+# Environment files
+.env
+.env.*
+
+# Temp files
+.DS_Store
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# CI/CD
+.github
+
+# Vercel
+.vercel
+
+# TypeScript build info
+*.tsbuildinfo

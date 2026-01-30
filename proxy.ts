@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 
 export default auth((req) => {
-  if (req.nextUrl.pathname.startsWith("/api/auth")) {
+  if (req.nextUrl.pathname.startsWith("/api/auth") || req.nextUrl.pathname === "/health") {
     return;
   }
 
