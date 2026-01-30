@@ -3,8 +3,7 @@
 import { auth } from "@/lib/auth";
 
 // Derive base URL from the CopilotKit runtime URL (strip /copilotkit suffix)
-const COPILOTKIT_URL = process.env.NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL ?? "http://localhost:3001/copilotkit";
-const API_BASE_URL = COPILOTKIT_URL.replace(/\/copilotkit\/?$/, "");
+const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
 
 export interface Message {
   id: string;

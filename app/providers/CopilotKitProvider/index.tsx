@@ -7,7 +7,7 @@ import "@copilotkit/react-ui/styles.css";
 import { ImageCacheProvider } from "../../contexts/ImageCacheContext";
 import { signInWithAuthentik } from "@/lib/auth-actions";
 
-function CopilotKitWrapper({ children, accessToken }: { children: React.ReactNode; accessToken: string }) {
+function CopilotKitWrapper({ children, accessToken, runtimeUrl }: { children: React.ReactNode; accessToken: string; runtimeUrl: string }) {
   const headers = useMemo(
     () => ({ Authorization: `Bearer ${accessToken}` }),
     [accessToken]
@@ -15,7 +15,7 @@ function CopilotKitWrapper({ children, accessToken }: { children: React.ReactNod
 
   return (
     <CopilotKit
-      runtimeUrl={process.env.NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL ?? "http://localhost:3001/copilotkit"}
+      runtimeUrl={runtimeUrl}
       agent="SERA"
       headers={headers}
     >
@@ -24,7 +24,7 @@ function CopilotKitWrapper({ children, accessToken }: { children: React.ReactNod
   );
 }
 
-export function CopilotKitProvider({ children }: { children: React.ReactNode }) {
+export function CopilotKitProvider({ children, runtimeUrl }: { children: React.ReactNode; runtimeUrl: string }) {
   const { data: session, status, update } = useSession();
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -88,7 +88,7 @@ export function CopilotKitProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <ImageCacheProvider>
-      <CopilotKitWrapper accessToken={session.accessToken}>
+      <CopilotKitWrapper accessToken={session.accessToken} runtimeUrl={runtimeUrl}>
         {children}
       </CopilotKitWrapper>
     </ImageCacheProvider>
