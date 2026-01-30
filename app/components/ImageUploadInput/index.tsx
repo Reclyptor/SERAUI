@@ -2,10 +2,12 @@
 
 import { useState, useRef } from "react";
 import clsx from "clsx";
+import { useSession } from "next-auth/react";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import { IconButton } from "../IconButton";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
+import { signInWithAuthentik } from "@/lib/auth-actions";
 
 interface ImageUploadInputProps {
   inProgress: boolean;
@@ -14,6 +16,7 @@ interface ImageUploadInputProps {
 }
 
 export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInputProps) {
+  const { data: session, update: updateSession } = useSession();
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<Array<{ id: string; file: File; preview: string }>>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -76,16 +79,32 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
   };
 
   const uploadImage = async (file: File): Promise<string> => {
+    // Check if token is expired or about to expire (within 30s), refresh first
+    let currentSession = session;
+    const expiresAt = currentSession?.expiresAt;
+    if (expiresAt && Date.now() > expiresAt * 1000 - 30000) {
+      const refreshedSession = await updateSession();
+      if (refreshedSession?.accessToken) {
+        currentSession = refreshedSession;
+      } else {
+        signInWithAuthentik();
+        throw new Error("Session expired");
+      }
+    }
+
     const formData = new FormData();
     formData.append('image', file);
 
     const response = await fetch('http://localhost:3001/copilotkit/upload-image', {
       method: 'POST',
+      headers: currentSession?.accessToken 
+        ? { Authorization: `Bearer ${currentSession.accessToken}` } 
+        : {},
       body: formData,
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       throw new Error(error.message || 'Failed to upload image');
     }
 
@@ -130,7 +149,11 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
       await onSend(finalMessage);
     } catch (error) {
       console.error("Failed to send message:", error);
-      alert(error instanceof Error ? error.message : 'Failed to send message');
+      // Don't show alert for auth errors - they're handled by redirect
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      if (errorMessage !== "Session expired") {
+        console.error("[ImageUploadInput] Error:", errorMessage);
+      }
     } finally {
       setUploading(false);
     }

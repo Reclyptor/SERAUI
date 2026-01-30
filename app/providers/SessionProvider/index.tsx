@@ -9,9 +9,7 @@ interface SessionProviderProps {
 export function SessionProvider({ children }: SessionProviderProps) {
   return (
     <NextAuthSessionProvider
-      // Refetch session every 4 minutes to get refreshed tokens before they expire
-      refetchInterval={4 * 60}
-      // Also refetch when window regains focus
+      // Refetch when window regains focus (handles returning from idle)
       refetchOnWindowFocus={true}
     >
       {children}

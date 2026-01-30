@@ -2,13 +2,12 @@
 
 import { CopilotKit } from "@copilotkit/react-core";
 import { useSession } from "next-auth/react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import "@copilotkit/react-ui/styles.css";
 import { ImageCacheProvider } from "../../contexts/ImageCacheContext";
 import { signInWithAuthentik } from "@/lib/auth-actions";
 
 function CopilotKitWrapper({ children, accessToken }: { children: React.ReactNode; accessToken: string }) {
-  // Memoize headers to prevent unnecessary re-renders, but update when token changes
   const headers = useMemo(
     () => ({ Authorization: `Bearer ${accessToken}` }),
     [accessToken]
@@ -16,8 +15,6 @@ function CopilotKitWrapper({ children, accessToken }: { children: React.ReactNod
 
   return (
     <CopilotKit
-      // Key forces re-initialization when token changes
-      key={accessToken}
       runtimeUrl={process.env.NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL ?? "http://localhost:3001/copilotkit"}
       agent="SERA"
       headers={headers}
@@ -29,6 +26,7 @@ function CopilotKitWrapper({ children, accessToken }: { children: React.ReactNod
 
 export function CopilotKitProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status, update } = useSession();
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Handle token refresh errors by redirecting to sign in
   useEffect(() => {
@@ -37,17 +35,36 @@ export function CopilotKitProvider({ children }: { children: React.ReactNode }) 
     }
   }, [session?.error]);
 
-  // Proactively refresh session when it might be getting stale
+  // Smart token refresh - schedule refresh 60 seconds before expiry
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated" || !session?.expiresAt) return;
 
-    // Check session freshness every 5 minutes
-    const interval = setInterval(() => {
+    // Clear any existing timeout
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+
+    // Calculate time until we should refresh (60s before expiry)
+    const expiresAtMs = session.expiresAt * 1000;
+    const refreshAtMs = expiresAtMs - 60000; // 60 seconds before expiry
+    const timeUntilRefresh = refreshAtMs - Date.now();
+
+    if (timeUntilRefresh <= 0) {
+      // Token is already expired or about to expire, refresh now
       update();
-    }, 5 * 60 * 1000);
+    } else {
+      // Schedule refresh for 60 seconds before expiry
+      refreshTimeoutRef.current = setTimeout(() => {
+        update();
+      }, timeUntilRefresh);
+    }
 
-    return () => clearInterval(interval);
-  }, [status, update]);
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [status, session?.expiresAt, update]);
 
   if (status === "loading") {
     return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Markdown } from "@copilotkit/react-ui";
 import { ChevronIcon } from "../Icons";
 
@@ -10,34 +10,43 @@ interface ThinkingMessageProps {
 }
 
 export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
-  const [isOpen, setIsOpen] = useState(true);
-  const [thinkingStartTime] = useState(Date.now());
-  const [duration, setDuration] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Parse thinking and response (handle incomplete blocks during streaming)
-  const thinkingStart = content.indexOf('[THINKING]\n');
-  const thinkingEnd = content.indexOf('\n[/THINKING]');
-  
-  let thinking: string | null = null;
-  let response = content;
-  const isThinkingComplete = thinkingEnd !== -1;
-  
-  if (thinkingStart !== -1) {
-    if (isThinkingComplete) {
-      // Complete thinking block
-      thinking = content.substring(thinkingStart + 11, thinkingEnd);
-      response = content.substring(thinkingEnd + 13);
-    } else {
-      // Incomplete thinking block (still streaming)
-      thinking = content.substring(thinkingStart + 11);
-      response = '';
+  const { thinking, response, isThinkingComplete } = useMemo(() => {
+    const thinkingStart = content.indexOf('[THINKING]\n');
+    const thinkingEnd = content.indexOf('\n[/THINKING]');
+    
+    let thinking: string | null = null;
+    let response = content;
+    const isThinkingComplete = thinkingEnd !== -1;
+    
+    if (thinkingStart !== -1) {
+      if (isThinkingComplete) {
+        // Complete thinking block
+        thinking = content.substring(thinkingStart + 11, thinkingEnd);
+        response = content.substring(thinkingEnd + 13);
+      } else {
+        // Incomplete thinking block (still streaming)
+        thinking = content.substring(thinkingStart + 11);
+        response = '';
+      }
     }
-  }
+    
+    return { thinking, response, isThinkingComplete };
+  }, [content]);
 
-  // Calculate duration and collapse when thinking completes
+  // Initialize isOpen based on whether thinking is already complete
+  // If loading an existing message with complete thinking, start closed
+  const [isOpen, setIsOpen] = useState(() => !isThinkingComplete);
+  const [thinkingStartTime] = useState(Date.now());
+  const [duration, setDuration] = useState<number | null>(() => 
+    isThinkingComplete ? 0 : null
+  );
+
+  // Collapse when thinking completes during streaming
   useEffect(() => {
-    if (isThinkingComplete && !duration) {
+    if (isThinkingComplete && duration === null) {
       const elapsed = Math.round((Date.now() - thinkingStartTime) / 1000);
       setDuration(elapsed);
       setIsOpen(false);
