@@ -1,28 +1,35 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useCopilotChatInternal } from "@copilotkit/react-core";
 import { ThinkingMessage } from "../ThinkingMessage";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { WelcomeView } from "../WelcomeView";
 import { useImageCache } from "../../contexts/ImageCacheContext";
+import { useChat } from "../../contexts/ChatContext";
+import type { Message } from "@/app/actions/chat";
+
+interface SeraChatProps {
+  chatID: string | null;
+  initialMessages: Message[];
+}
 
 function CustomUserMessage({ message }: { message: any }) {
   const content = message.content || "";
   const { getImage } = useImageCache();
   
-  const imageIdRegex = /\[IMG:([a-f0-9-]+)\]/g;
-  const imageIds = Array.from(content.matchAll(imageIdRegex)).map(m => m[1]);
-  const cleanText = content.replace(imageIdRegex, '').trim();
+  const imageIDRegex = /\[IMG:([a-f0-9-]+)\]/g;
+  const imageIDs = Array.from(content.matchAll(imageIDRegex) as IterableIterator<RegExpMatchArray>).map(m => m[1]);
+  const cleanText = content.replace(imageIDRegex, '').trim();
   
   return (
     <div className="py-4 max-w-[672px] mx-auto w-full">
       <div className="flex justify-end">
         <div className="bg-background-tertiary text-foreground rounded-2xl px-4 py-2 max-w-[80%] whitespace-pre-wrap">
-          {imageIds.length > 0 && (
+          {imageIDs.length > 0 && (
             <div className="flex gap-2 flex-wrap mb-2">
-              {imageIds.map((id) => {
+              {imageIDs.map((id) => {
                 const cached = getImage(id);
                 return cached ? (
                   <ImageThumbnail key={id} src={cached.preview} alt="Uploaded" size="lg" />
@@ -45,13 +52,37 @@ function CustomAssistantMessage({ message, isLoading }: { message: any, isLoadin
   );
 }
 
-export function SeraChat() {
-  const { messages = [], sendMessage, isLoading, stopGeneration } = useCopilotChatInternal({
-    instructions: "You are SERA, a helpful AI assistant. Be friendly, concise, and helpful in your responses."
-  });
+export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
+  const { messages = [], sendMessage, isLoading, stopGeneration, setMessages } = useCopilotChatInternal({});
   
+  const { saveMessages } = useChat();
   const [localMessages, setLocalMessages] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevChatIDRef = useRef<string | null>(chatID);
+  const wasLoadingRef = useRef(false);
+  const hasSavedRef = useRef(false);
+
+  // Handle chat changes - reset or restore messages
+  useEffect(() => {
+    if (prevChatIDRef.current !== chatID) {
+      prevChatIDRef.current = chatID;
+      hasSavedRef.current = false;
+      
+      if (chatID === null) {
+        // New chat - clear messages
+        setLocalMessages([]);
+        if (setMessages) {
+          setMessages([]);
+        }
+      } else if (initialMessages.length > 0) {
+        // Restoring a chat - set initial messages
+        setLocalMessages(initialMessages);
+        if (setMessages) {
+          setMessages(initialMessages as any);
+        }
+      }
+    }
+  }, [chatID, initialMessages, setMessages]);
 
   // Sync local messages with visible messages when they update
   useEffect(() => {
@@ -60,14 +91,39 @@ export function SeraChat() {
     }
   }, [messages]);
 
+  // Save messages when generation completes
+  useEffect(() => {
+    // Detect when loading transitions from true to false (generation complete)
+    if (wasLoadingRef.current && !isLoading && messages.length > 0) {
+      // Only save if we haven't already saved this set of messages
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage?.role === "assistant" && lastMessage?.content && !hasSavedRef.current) {
+        hasSavedRef.current = true;
+        const messagesToSave = messages.map((m: any) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt,
+        }));
+        saveMessages(messagesToSave).then(() => {
+          // Reset flag after a short delay to allow for subsequent saves
+          setTimeout(() => {
+            hasSavedRef.current = false;
+          }, 1000);
+        });
+      }
+    }
+    wasLoadingRef.current = isLoading;
+  }, [isLoading, messages, saveMessages]);
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, localMessages, isLoading]);
+  }, [messages, isLoading]);
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = useCallback(async (content: string) => {
     const message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -79,7 +135,7 @@ export function SeraChat() {
     setLocalMessages(prev => [...prev, message]);
     
     sendMessage(message as any);
-  };
+  }, [sendMessage]);
 
   const messagesToRender = (messages && messages.length > 0) ? messages : localMessages;
 

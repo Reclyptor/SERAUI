@@ -23,8 +23,8 @@ interface Chat {
 interface SidebarProps {
   recentChats?: Chat[];
   onNewChat?: () => void;
-  onSelectChat?: (id: string) => void;
-  currentChatId?: string | null;
+  onSelectChat?: (chatID: string) => void;
+  currentChatID?: string | null;
 }
 
 interface NavItemProps {
@@ -88,7 +88,7 @@ export function Sidebar({
   recentChats = [],
   onNewChat,
   onSelectChat,
-  currentChatId,
+  currentChatID,
 }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -107,7 +107,7 @@ export function Sidebar({
           recentChats={recentChats}
           onNewChat={onNewChat}
           onSelectChat={onSelectChat}
-          currentChatId={currentChatId}
+          currentChatID={currentChatID}
         />
       </aside>
 
@@ -124,7 +124,7 @@ export function Sidebar({
           recentChats={recentChats}
           onNewChat={onNewChat}
           onSelectChat={onSelectChat}
-          currentChatId={currentChatId}
+          currentChatID={currentChatID}
         />
       </aside>
 
@@ -145,14 +145,14 @@ function SidebarContent({
   recentChats,
   onNewChat,
   onSelectChat,
-  currentChatId,
+  currentChatID,
 }: {
   isCollapsed: boolean;
   setIsCollapsed: (v: boolean) => void;
   recentChats: Chat[];
   onNewChat?: () => void;
-  onSelectChat?: (id: string) => void;
-  currentChatId?: string | null;
+  onSelectChat?: (chatID: string) => void;
+  currentChatID?: string | null;
 }) {
   const { name: userName, initials: userInitials } = useUser();
 
@@ -244,7 +244,7 @@ function SidebarContent({
                 chat={chat}
                 onClick={() => onSelectChat?.(chat.id)}
                 isCollapsed={isCollapsed}
-                isActive={currentChatId === chat.id}
+                isActive={currentChatID === chat.id}
               />
             ))}
           </div>

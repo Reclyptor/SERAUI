@@ -90,7 +90,7 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
     }
 
     const data = await response.json();
-    return data.imageId;
+    return data.imageID;
   };
 
   const handleSubmit = async () => {
@@ -102,7 +102,7 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
       setUploading(true);
 
       // Upload all images first and get their IDs
-      const imageIds = await Promise.all(
+      const imageIDs = await Promise.all(
         images.map(async (img) => {
           const id = await uploadImage(img.file);
           // Cache the preview for later display
@@ -115,8 +115,8 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
 
       // Build message with image ID references
       let finalMessage = userMessage;
-      if (imageIds.length > 0) {
-        const imageMarkers = imageIds.map(id => `[IMG:${id}]`).join(' ');
+      if (imageIDs.length > 0) {
+        const imageMarkers = imageIDs.map(id => `[IMG:${id}]`).join(' ');
         finalMessage = `${userMessage} ${imageMarkers}`;
       }
 
