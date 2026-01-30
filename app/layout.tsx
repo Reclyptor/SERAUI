@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { CopilotKitProvider } from "./providers/CopilotKitProvider";
+import { SessionProvider } from "./providers/SessionProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,7 +33,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        <CopilotKitProvider>{children}</CopilotKitProvider>
+        <SessionProvider>
+          <CopilotKitProvider>{children}</CopilotKitProvider>
+        </SessionProvider>
       </body>
     </html>
   );
