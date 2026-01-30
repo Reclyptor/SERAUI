@@ -39,14 +39,14 @@ function NavItem({ icon, label, onClick, isCollapsed, isActive }: NavItemProps) 
     <button
       onClick={onClick}
       className={clsx(
-        "flex items-center gap-3 w-full rounded-lg transition-colors",
+        "flex items-center gap-3 h-8 rounded-lg transition-colors",
         "text-foreground-muted hover:text-foreground hover:bg-background-tertiary",
-        isCollapsed ? "justify-center p-2" : "px-3 py-2",
+        isCollapsed ? "w-8 justify-center" : "w-full pl-1.5 pr-3",
         isActive && "bg-background-tertiary text-foreground"
       )}
       title={isCollapsed ? label : undefined}
     >
-      <div className="w-8 h-8 flex items-center justify-center shrink-0 rounded-lg">
+      <div className="w-5 h-5 flex items-center justify-center shrink-0">
         {icon}
       </div>
       {!isCollapsed && (
@@ -158,13 +158,15 @@ function SidebarContent({
       {/* Header */}
       <div
         className={clsx(
-          "flex items-center h-14 shrink-0",
-          isCollapsed ? "justify-center px-2" : "justify-between px-3"
+          "flex items-center h-14 shrink-0 px-2",
+          isCollapsed ? "justify-center" : "justify-between"
         )}
       >
         {!isCollapsed ? (
-          <div className="flex items-center gap-2">
-            <img src="/sera.png" alt="SERA" className="w-6 h-6" />
+          <div className="flex items-center gap-3 h-8 pl-1.5 pr-3">
+            <div className="w-5 h-5 shrink-0">
+              <img src="/sera.png" alt="SERA" className="w-full h-full object-cover" />
+            </div>
             <span className="text-lg font-semibold text-foreground">SERA</span>
           </div>
         ) : (
@@ -173,7 +175,9 @@ function SidebarContent({
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-background-tertiary transition-colors"
             title="Expand sidebar"
           >
-            <img src="/sera.png" alt="SERA" className="w-6 h-6" />
+            <div className="w-5 h-5 shrink-0">
+              <img src="/sera.png" alt="SERA" className="w-full h-full object-cover" />
+            </div>
           </button>
         )}
         {!isCollapsed && (
@@ -188,7 +192,7 @@ function SidebarContent({
       </div>
 
       {/* Navigation */}
-      <nav className={clsx("flex flex-col gap-1", isCollapsed ? "px-2" : "px-2")}>
+      <nav className={clsx("flex flex-col gap-1 px-2", isCollapsed && "items-center")}>
         <NavItem
           icon={<Plus className="w-5 h-5" />}
           label="New chat"
@@ -250,17 +254,17 @@ function SidebarContent({
       {/* User profile */}
       <div
         className={clsx(
-          "shrink-0 border-t border-border",
-          isCollapsed ? "p-2" : "p-3"
+          "shrink-0 border-t border-border px-2 py-2",
+          isCollapsed && "flex justify-center"
         )}
       >
         <button
           className={clsx(
-            "flex items-center gap-3 w-full rounded-lg transition-colors hover:bg-background-tertiary",
-            isCollapsed ? "justify-center p-2" : "p-2"
+            "flex items-center gap-3 rounded-lg transition-colors hover:bg-background-tertiary",
+            isCollapsed ? "w-8 h-8 justify-center" : "w-full h-8 pl-1.5 pr-3"
           )}
         >
-          <div className="w-8 h-8 rounded-full bg-foreground-muted flex items-center justify-center text-background text-sm font-medium shrink-0">
+          <div className="w-5 h-5 rounded-full bg-foreground-muted flex items-center justify-center text-background text-xs font-medium shrink-0">
             U
           </div>
           {!isCollapsed && (
