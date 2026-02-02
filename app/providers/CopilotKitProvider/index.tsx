@@ -1,30 +1,35 @@
 "use client";
 
-import { CopilotKit } from "@copilotkit/react-core";
 import { useSession } from "next-auth/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import "@copilotkit/react-ui/styles.css";
 import { ImageCacheProvider } from "../../contexts/ImageCacheContext";
 import { signInWithAuthentik } from "@/lib/auth-actions";
 
-function CopilotKitWrapper({ children, accessToken, runtimeUrl }: { children: React.ReactNode; accessToken: string; runtimeUrl: string }) {
-  const headers = useMemo(
-    () => ({ Authorization: `Bearer ${accessToken}` }),
-    [accessToken]
-  );
+interface CopilotKitProviderProps {
+  children: React.ReactNode;
+  runtimeUrl: string;
+}
 
+interface AuthenticatedContentProps {
+  children: React.ReactNode;
+  accessToken: string;
+  runtimeUrl: string;
+}
+
+function AuthenticatedContent({ children, accessToken, runtimeUrl }: AuthenticatedContentProps) {
+  // Clone children and pass accessToken and runtimeUrl as props
+  // Children (page.tsx) will handle CopilotKit provider
   return (
-    <CopilotKit
-      runtimeUrl={runtimeUrl}
-      agent="SERA"
-      headers={headers}
-    >
-      {children}
-    </CopilotKit>
+    <>
+      {typeof children === 'function' 
+        ? children({ accessToken, runtimeUrl })
+        : children}
+    </>
   );
 }
 
-export function CopilotKitProvider({ children, runtimeUrl }: { children: React.ReactNode; runtimeUrl: string }) {
+export function CopilotKitProvider({ children, runtimeUrl }: CopilotKitProviderProps) {
   const { data: session, status, update } = useSession();
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -88,9 +93,27 @@ export function CopilotKitProvider({ children, runtimeUrl }: { children: React.R
 
   return (
     <ImageCacheProvider>
-      <CopilotKitWrapper accessToken={session.accessToken} runtimeUrl={runtimeUrl}>
+      <AuthContext.Provider value={{ accessToken: session.accessToken, runtimeUrl }}>
         {children}
-      </CopilotKitWrapper>
+      </AuthContext.Provider>
     </ImageCacheProvider>
   );
+}
+
+// Context to pass auth info to page components
+import { createContext, useContext } from "react";
+
+interface AuthContextValue {
+  accessToken: string;
+  runtimeUrl: string;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within CopilotKitProvider");
+  }
+  return context;
 }

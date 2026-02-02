@@ -56,40 +56,16 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
   const { messages = [], sendMessage, isLoading, stopGeneration, setMessages } = useCopilotChatInternal({});
   
   const { saveMessages } = useChat();
-  const [localMessages, setLocalMessages] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const prevChatIDRef = useRef<string | null>(chatID);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
 
-  // Handle chat changes - reset or restore messages
+  // Initialize CopilotKit with messages on mount
   useEffect(() => {
-    if (prevChatIDRef.current !== chatID) {
-      prevChatIDRef.current = chatID;
-      hasSavedRef.current = false;
-      
-      if (chatID === null) {
-        // New chat - clear messages
-        setLocalMessages([]);
-        if (setMessages) {
-          setMessages([]);
-        }
-      } else if (initialMessages.length > 0) {
-        // Restoring a chat - set initial messages
-        setLocalMessages(initialMessages);
-        if (setMessages) {
-          setMessages(initialMessages as any);
-        }
-      }
+    if (setMessages && initialMessages.length > 0) {
+      setMessages(initialMessages as any);
     }
-  }, [chatID, initialMessages, setMessages]);
-
-  // Sync local messages with visible messages when they update
-  useEffect(() => {
-    if (messages && messages.length > 0) {
-      setLocalMessages(messages);
-    }
-  }, [messages]);
+  }, []); // Only run once on mount
 
   // Save messages when generation completes
   useEffect(() => {
@@ -131,13 +107,11 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
       createdAt: new Date(),
     };
     
-    // Optimistic update
-    setLocalMessages(prev => [...prev, message]);
-    
     sendMessage(message as any);
   }, [sendMessage]);
 
-  const messagesToRender = (messages && messages.length > 0) ? messages : localMessages;
+  // Use CopilotKit messages, or initialMessages for first render before CopilotKit syncs
+  const messagesToRender = messages.length > 0 ? messages : initialMessages;
 
   if (messagesToRender.length === 0) {
     return (
