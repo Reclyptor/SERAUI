@@ -128,13 +128,6 @@ export function Sidebar({
         />
       </aside>
 
-      {/* Mobile overlay when sidebar is open */}
-      {!isCollapsed && (
-        <div
-          className="lg:hidden fixed inset-0 z-30 bg-black/50"
-          onClick={() => setIsCollapsed(true)}
-        />
-      )}
     </>
   );
 }
