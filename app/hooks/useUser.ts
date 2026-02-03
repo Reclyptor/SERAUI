@@ -19,6 +19,8 @@ export function useUser() {
   const email = user?.email ?? null;
   const image = user?.image ?? null;
   const initials = getInitials(user?.name);
+  const isLoading = status === "loading";
+  const isAuthenticated = status === "authenticated";
 
   return {
     user,
@@ -26,7 +28,7 @@ export function useUser() {
     email,
     image,
     initials,
-    isLoading: status === "loading",
-    isAuthenticated: status === "authenticated",
+    isLoading,
+    isAuthenticated,
   };
 }

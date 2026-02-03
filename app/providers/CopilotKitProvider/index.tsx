@@ -11,27 +11,18 @@ interface CopilotKitProviderProps {
   runtimeUrl: string;
 }
 
-interface AuthenticatedContentProps {
-  children: React.ReactNode;
-  accessToken: string;
-  runtimeUrl: string;
-}
-
-function AuthenticatedContent({ children, accessToken, runtimeUrl }: AuthenticatedContentProps) {
-  // Clone children and pass accessToken and runtimeUrl as props
-  // Children (page.tsx) will handle CopilotKit provider
-  return (
-    <>
-      {typeof children === 'function' 
-        ? children({ accessToken, runtimeUrl })
-        : children}
-    </>
-  );
-}
-
 export function CopilotKitProvider({ children, runtimeUrl }: CopilotKitProviderProps) {
   const { data: session, status, update } = useSession();
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Keep track of the last valid session to prevent flickering during token refresh
+  const lastValidSessionRef = useRef<typeof session>(null);
+
+  // Update the last valid session whenever we have a valid one
+  useEffect(() => {
+    if (session?.accessToken) {
+      lastValidSessionRef.current = session;
+    }
+  }, [session]);
 
   // Handle token refresh errors by redirecting to sign in
   useEffect(() => {
@@ -71,7 +62,11 @@ export function CopilotKitProvider({ children, runtimeUrl }: CopilotKitProviderP
     };
   }, [status, session?.expiresAt, update]);
 
-  if (status === "loading") {
+  // Use the last valid session during refresh to prevent flickering
+  const effectiveSession = session?.accessToken ? session : lastValidSessionRef.current;
+
+  // Only show loading on initial page load (no session data at all yet)
+  if (status === "loading" && !effectiveSession?.accessToken) {
     return (
       <ImageCacheProvider>
         <div className="flex items-center justify-center h-screen bg-background">
@@ -81,7 +76,8 @@ export function CopilotKitProvider({ children, runtimeUrl }: CopilotKitProviderP
     );
   }
 
-  if (status !== "authenticated" || !session?.accessToken) {
+  // Show authenticating only if we have no valid session to fall back to
+  if (status !== "authenticated" && !effectiveSession?.accessToken) {
     return (
       <ImageCacheProvider>
         <div className="flex items-center justify-center h-screen bg-background">
@@ -91,11 +87,23 @@ export function CopilotKitProvider({ children, runtimeUrl }: CopilotKitProviderP
     );
   }
 
+  // If we have a valid session (current or cached), render the app
+  if (effectiveSession?.accessToken) {
+    return (
+      <ImageCacheProvider>
+        <AuthContext.Provider value={{ accessToken: effectiveSession.accessToken, runtimeUrl }}>
+          {children}
+        </AuthContext.Provider>
+      </ImageCacheProvider>
+    );
+  }
+
+  // Fallback (should not reach here normally)
   return (
     <ImageCacheProvider>
-      <AuthContext.Provider value={{ accessToken: session.accessToken, runtimeUrl }}>
-        {children}
-      </AuthContext.Provider>
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="text-foreground-muted">Authenticating...</div>
+      </div>
     </ImageCacheProvider>
   );
 }
