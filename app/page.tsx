@@ -4,11 +4,9 @@ import { useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { ChatContainer } from "./components/ChatContainer";
 import { useChat } from "./contexts/ChatContext";
-import { useAuth } from "./providers/CopilotKitProvider";
 
 export default function Home() {
   const { currentChatID, currentMessages, recentChats, newChat, selectChat } = useChat();
-  const { accessToken, runtimeUrl } = useAuth();
   const [chatKey, setChatKey] = useState(0);
 
   const handleNewChat = () => {
@@ -43,8 +41,6 @@ export default function Home() {
           key={containerKey}
           chatID={currentChatID}
           initialMessages={currentMessages}
-          accessToken={accessToken}
-          runtimeUrl={runtimeUrl}
         />
       </main>
     </div>

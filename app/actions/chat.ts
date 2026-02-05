@@ -1,6 +1,6 @@
 "use server";
 
-import { auth } from "@/lib/auth";
+import { cookies } from "next/headers";
 
 // Derive base URL from the CopilotKit runtime URL (strip /copilotkit suffix)
 const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
@@ -29,20 +29,21 @@ export interface ChatListItem {
   updatedAt: string;
 }
 
-async function getAccessToken(): Promise<string> {
-  const session = await auth();
-  if (!session?.accessToken) {
+async function getCookieHeader(): Promise<string> {
+  const cookieStore = await cookies();
+  const allCookies = cookieStore.getAll();
+  if (allCookies.length === 0) {
     throw new Error("Not authenticated");
   }
-  return session.accessToken;
+  return allCookies.map(c => `${c.name}=${c.value}`).join("; ");
 }
 
 export async function getChats(): Promise<ChatListItem[]> {
-  const accessToken = await getAccessToken();
+  const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats`, {
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Cookie: cookieHeader,
     },
     cache: "no-store",
   });
@@ -55,11 +56,11 @@ export async function getChats(): Promise<ChatListItem[]> {
 }
 
 export async function getChat(chatID: string): Promise<Chat> {
-  const accessToken = await getAccessToken();
+  const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Cookie: cookieHeader,
     },
     cache: "no-store",
   });
@@ -72,12 +73,12 @@ export async function getChat(chatID: string): Promise<Chat> {
 }
 
 export async function createChat(messages: Message[]): Promise<Chat> {
-  const accessToken = await getAccessToken();
+  const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Cookie: cookieHeader,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ messages }),
@@ -91,12 +92,12 @@ export async function createChat(messages: Message[]): Promise<Chat> {
 }
 
 export async function updateChat(chatID: string, messages: Message[]): Promise<Chat> {
-  const accessToken = await getAccessToken();
+  const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
     method: "PATCH",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Cookie: cookieHeader,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ messages }),
@@ -110,16 +111,35 @@ export async function updateChat(chatID: string, messages: Message[]): Promise<C
 }
 
 export async function deleteChat(chatID: string): Promise<void> {
-  const accessToken = await getAccessToken();
+  const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
     method: "DELETE",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Cookie: cookieHeader,
     },
   });
 
   if (!response.ok) {
     throw new Error(`Failed to delete chat: ${response.statusText}`);
   }
+}
+
+export async function uploadImage(formData: FormData): Promise<{ imageID: string }> {
+  const cookieHeader = await getCookieHeader();
+
+  const response = await fetch(`${API_BASE_URL}/copilotkit/upload-image`, {
+    method: "POST",
+    headers: {
+      Cookie: cookieHeader,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to upload image");
+  }
+
+  return response.json();
 }
