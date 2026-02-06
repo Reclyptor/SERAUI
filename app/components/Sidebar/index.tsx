@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import clsx from "clsx";
 import {
   PanelLeftClose,
-  PanelLeft,
   Plus,
   Search,
   MessageSquare,
@@ -12,8 +11,12 @@ import {
   Grid2X2,
   Code,
   ChevronUp,
+  LogOut,
+  Clock,
 } from "lucide-react";
+import { signOut } from "next-auth/react";
 import { useUser } from "@/app/hooks/useUser";
+import { useSessionTimer } from "@/app/hooks/useSessionTimer";
 
 interface Chat {
   id: string;
@@ -147,7 +150,27 @@ function SidebarContent({
   onSelectChat?: (chatID: string) => void;
   currentChatID?: string | null;
 }) {
-  const { name: userName, initials: userInitials } = useUser();
+  const { name: userName, initials: userInitials, expiresAt } = useUser();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const { formatted: sessionTimeLeft } = useSessionTimer(expiresAt);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close the menu when the sidebar collapses
+  useEffect(() => {
+    if (isCollapsed) setIsUserMenuOpen(false);
+  }, [isCollapsed]);
+
+  // Close the menu when clicking outside
+  useEffect(() => {
+    if (!isUserMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isUserMenuOpen]);
 
   return (
     <>
@@ -247,33 +270,80 @@ function SidebarContent({
       {/* Spacer when collapsed or no chats */}
       {(isCollapsed || recentChats.length === 0) && <div className="flex-1" />}
 
-      {/* User profile */}
-      <div
-        className={clsx(
-          "shrink-0 border-t border-border px-2 py-2",
-          isCollapsed && "flex justify-center"
-        )}
-      >
-        <button
+      {/* User profile with drop-up menu */}
+      <div ref={userMenuRef} className="shrink-0 relative">
+        {/* Drop-up panel */}
+        <div
           className={clsx(
-            "flex items-center gap-3 rounded-lg transition-colors hover:bg-background-tertiary",
-            isCollapsed ? "w-8 h-8 justify-center" : "w-full h-8 pl-1.5 pr-3"
+            "overflow-hidden transition-[grid-template-rows] duration-200 ease-in-out",
+            "grid",
+            isUserMenuOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
           )}
-          title={ isCollapsed ? userName : undefined }
         >
-          <div className="w-5 h-5 rounded-full bg-foreground-muted flex items-center justify-center text-background text-xs font-medium shrink-0">
-            { userInitials }
-          </div>
-          {!isCollapsed && (
-            <>
-              <div className="flex-1 min-w-0 text-left">
-                <div className="text-sm font-medium text-foreground truncate">
-                  { userName }
-                </div>
+          <div className="min-h-0">
+            <div
+              className={clsx(
+                "border-t border-border px-3 py-3 flex flex-col gap-2",
+                isCollapsed && "min-w-[200px]"
+              )}
+            >
+              {/* Session timer */}
+              <div className="flex items-center gap-2 text-foreground-muted">
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-xs">
+                  Session: {sessionTimeLeft ?? "--:--"}
+                </span>
               </div>
-            </>
+
+              {/* Logout button */}
+              <button
+                onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
+                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5 shrink-0" />
+                <span>Log out</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* User button */}
+        <div
+          className={clsx(
+            "border-t border-border px-2 py-2",
+            isCollapsed && "flex justify-center"
           )}
-        </button>
+        >
+          <button
+            onClick={isCollapsed ? undefined : () => setIsUserMenuOpen((prev) => !prev)}
+            className={clsx(
+              "flex items-center gap-3 rounded-lg transition-colors",
+              isCollapsed
+                ? "w-8 h-8 justify-center cursor-default"
+                : "w-full h-8 pl-1.5 pr-3 hover:bg-background-tertiary"
+            )}
+            title={isCollapsed ? userName : undefined}
+          >
+            <div className="w-5 h-5 rounded-full bg-foreground-muted flex items-center justify-center text-background text-xs font-medium shrink-0">
+              {userInitials}
+            </div>
+            {!isCollapsed && (
+              <>
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="text-sm font-medium text-foreground truncate">
+                    {userName}
+                  </div>
+                </div>
+                <ChevronUp
+                  className={clsx(
+                    "w-4 h-4 text-foreground-muted transition-transform duration-200",
+                    isUserMenuOpen ? "rotate-0" : "rotate-180"
+                  )}
+                />
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </>
   );

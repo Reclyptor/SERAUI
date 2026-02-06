@@ -21,6 +21,7 @@ export function useUser() {
   const initials = getInitials(user?.name);
   const isLoading = status === "loading";
   const isAuthenticated = status === "authenticated";
+  const expiresAt = session?.expiresAt ?? null;
 
   return {
     user,
@@ -30,5 +31,6 @@ export function useUser() {
     initials,
     isLoading,
     isAuthenticated,
+    expiresAt,
   };
 }

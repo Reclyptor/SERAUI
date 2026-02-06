@@ -129,6 +129,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (!token.accessToken) {
         session.error = "RefreshError";
       }
+      // Expose token expiry so the client can show a countdown timer
+      if (token.expiresAt) {
+        session.expiresAt = token.expiresAt as number;
+      }
       return session;
     },
   },
