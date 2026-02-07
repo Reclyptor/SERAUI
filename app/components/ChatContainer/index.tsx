@@ -10,13 +10,8 @@ interface ChatContainerProps {
 }
 
 export function ChatContainer({ chatID, initialMessages }: ChatContainerProps) {
-  // Use local API route that proxies to backend with server-side auth
-  // This keeps access tokens out of the browser entirely
   return (
-    <CopilotKit
-      runtimeUrl="/api/copilotkit"
-      agent="SERA"
-    >
+    <CopilotKit runtimeUrl="/api/copilotkit" agent="SERA">
       <SeraChat chatID={chatID} initialMessages={initialMessages} />
     </CopilotKit>
   );
