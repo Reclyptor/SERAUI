@@ -12,7 +12,6 @@ import {
   Code,
   ChevronUp,
   LogOut,
-  Clock,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useUser } from "@/app/hooks/useUser";
@@ -287,21 +286,18 @@ function SidebarContent({
                 isCollapsed && "min-w-[200px]"
               )}
             >
-              {/* Session timer */}
-              <div className="flex items-center gap-2 text-foreground-muted">
-                <Clock className="w-3.5 h-3.5 shrink-0" />
-                <span className="text-xs">
-                  Session: {sessionTimeLeft ?? "--:--"}
-                </span>
-              </div>
-
-              {/* Logout button */}
+              {/* Logout button with session timer */}
               <button
                 onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
-                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
+                className="flex items-center justify-between w-full px-2 py-1.5 rounded-md text-sm text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
               >
-                <LogOut className="w-3.5 h-3.5 shrink-0" />
-                <span>Log out</span>
+                <span className="flex items-center gap-2">
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span>Log out</span>
+                </span>
+                <span className="text-xs tabular-nums">
+                  {sessionTimeLeft ?? "--:--"}
+                </span>
               </button>
             </div>
           </div>
