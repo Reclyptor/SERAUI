@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import clsx from "clsx";
 import {
   PanelLeftClose,
@@ -16,18 +17,7 @@ import {
 import { signOut } from "next-auth/react";
 import { useUser } from "@/app/hooks/useUser";
 import { useSessionTimer } from "@/app/hooks/useSessionTimer";
-
-interface Chat {
-  id: string;
-  title: string;
-}
-
-interface SidebarProps {
-  recentChats?: Chat[];
-  onNewChat?: () => void;
-  onSelectChat?: (chatID: string) => void;
-  currentChatID?: string | null;
-}
+import { useChat } from "@/app/contexts/ChatContext";
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -65,7 +55,7 @@ function ChatItem({
   isCollapsed,
   isActive,
 }: {
-  chat: Chat;
+  chat: { id: string; title: string };
   onClick: () => void;
   isCollapsed: boolean;
   isActive: boolean;
@@ -86,13 +76,25 @@ function ChatItem({
   );
 }
 
-export function Sidebar({
-  recentChats = [],
-  onNewChat,
-  onSelectChat,
-  currentChatID,
-}: SidebarProps) {
+export function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const { recentChats } = useChat();
+
+  // Derive current chat ID from URL
+  const currentChatID = pathname.match(/^\/chat\/(.+)/)?.[1] ?? null;
+
+  const sidebarChats = recentChats.map((chat) => ({
+    id: chat._id,
+    title: chat.title,
+  }));
+
+  const handleNewChat = () => router.push("/new");
+  const handleSelectChat = (chatID: string) => {
+    if (currentChatID === chatID) return;
+    router.push(`/chat/${chatID}`);
+  };
 
   return (
     <>
@@ -106,9 +108,9 @@ export function Sidebar({
         <SidebarContent
           isCollapsed={isCollapsed}
           setIsCollapsed={setIsCollapsed}
-          recentChats={recentChats}
-          onNewChat={onNewChat}
-          onSelectChat={onSelectChat}
+          recentChats={sidebarChats}
+          onNewChat={handleNewChat}
+          onSelectChat={handleSelectChat}
           currentChatID={currentChatID}
         />
       </aside>
@@ -123,13 +125,12 @@ export function Sidebar({
         <SidebarContent
           isCollapsed={isCollapsed}
           setIsCollapsed={setIsCollapsed}
-          recentChats={recentChats}
-          onNewChat={onNewChat}
-          onSelectChat={onSelectChat}
+          recentChats={sidebarChats}
+          onNewChat={handleNewChat}
+          onSelectChat={handleSelectChat}
           currentChatID={currentChatID}
         />
       </aside>
-
     </>
   );
 }
@@ -144,10 +145,10 @@ function SidebarContent({
 }: {
   isCollapsed: boolean;
   setIsCollapsed: (v: boolean) => void;
-  recentChats: Chat[];
-  onNewChat?: () => void;
-  onSelectChat?: (chatID: string) => void;
-  currentChatID?: string | null;
+  recentChats: { id: string; title: string }[];
+  onNewChat: () => void;
+  onSelectChat: (chatID: string) => void;
+  currentChatID: string | null;
 }) {
   const { name: userName, initials: userInitials, expiresAt } = useUser();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -257,7 +258,7 @@ function SidebarContent({
               <ChatItem
                 key={chat.id}
                 chat={chat}
-                onClick={() => onSelectChat?.(chat.id)}
+                onClick={() => onSelectChat(chat.id)}
                 isCollapsed={isCollapsed}
                 isActive={currentChatID === chat.id}
               />

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "./providers/AuthProvider";
 import { SessionProvider } from "./providers/SessionProvider";
 import { ChatProvider } from "./contexts/ChatContext";
+import { WorkflowProvider } from "./contexts/WorkflowContext";
 import "@copilotkit/react-ui/styles.css";
 import "./globals.css";
 
@@ -40,7 +41,9 @@ export default function RootLayout({
       >
         <SessionProvider>
           <AuthProvider>
-            <ChatProvider>{children}</ChatProvider>
+            <WorkflowProvider>
+              <ChatProvider>{children}</ChatProvider>
+            </WorkflowProvider>
           </AuthProvider>
         </SessionProvider>
       </body>

@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useCopilotChatInternal } from "@copilotkit/react-core";
+import { useCopilotKit } from "@copilotkitnext/react";
 import { ThinkingMessage } from "../ThinkingMessage";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { WelcomeView } from "../WelcomeView";
+import { WorkflowBanner } from "../WorkflowBanner";
+import { ReviewCardList } from "../ReviewCard";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import { useChat } from "../../contexts/ChatContext";
+import { useWorkflows } from "../../contexts/WorkflowContext";
+import { getPendingReviews, type ReviewItem } from "@/app/actions/media";
 import type { Message } from "@/app/actions/chat";
 
 interface SeraChatProps {
@@ -18,11 +24,11 @@ interface SeraChatProps {
 function CustomUserMessage({ message }: { message: any }) {
   const content = message.content || "";
   const { getImage } = useImageCache();
-  
+
   const imageIDRegex = /\[IMG:([a-f0-9-]+)\]/g;
   const imageIDs = Array.from(content.matchAll(imageIDRegex) as IterableIterator<RegExpMatchArray>).map(m => m[1]);
   const cleanText = content.replace(imageIDRegex, '').trim();
-  
+
   return (
     <div className="py-4 max-w-[672px] mx-auto w-full">
       <div className="flex justify-end">
@@ -53,25 +59,99 @@ function CustomAssistantMessage({ message, isLoading }: { message: any, isLoadin
 }
 
 export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
-  const { messages = [], sendMessage, isLoading, stopGeneration, setMessages } = useCopilotChatInternal({});
-  
-  const { saveMessages } = useChat();
+  const {
+    messages = [],
+    sendMessage,
+    isLoading,
+    agent,
+    stopGeneration,
+    setMessages,
+  } = useCopilotChatInternal({});
+  const { copilotkit } = useCopilotKit();
+  const router = useRouter();
+  const { createNewChat, updateExistingChat } = useChat();
+  const { trackWorkflow, activeWorkflows } = useWorkflows();
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
+  const autoStartedRef = useRef<Set<string>>(new Set());
+  const hydratedRef = useRef(false);
+  const trackedWorkflowIdsRef = useRef<Set<string>>(new Set());
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [agentReady, setAgentReady] = useState(false);
+  const [pendingReviews, setPendingReviews] = useState<
+    Array<{ workflowId: string; reviews: ReviewItem[] }>
+  >([]);
 
-  // Initialize CopilotKit with messages on mount
+  const shouldAutoStartFromServer =
+    chatID !== null &&
+    initialMessages.length > 0 &&
+    initialMessages[initialMessages.length - 1].role === "user" &&
+    !initialMessages.some((m) => m.role === "assistant");
+
+  // Hydrate chat messages once per mounted chat container.
+  // For fresh chats with only one user message, we do not hydrate and instead
+  // send that message through CopilotKit once available.
   useEffect(() => {
-    if (setMessages && initialMessages.length > 0) {
-      setMessages(initialMessages as any);
+    if (hydratedRef.current) return;
+    if (!shouldAutoStartFromServer) {
+      setMessages(initialMessages.length > 0 ? (initialMessages as any) : []);
     }
-  }, []); // Only run once on mount
+    hydratedRef.current = true;
+  }, [initialMessages, setMessages, shouldAutoStartFromServer]);
+
+  // Explicitly connect the current agent to avoid first-run races where
+  // sendMessage is called before runtime connection is ready.
+  useEffect(() => {
+    let cancelled = false;
+    setAgentReady(false);
+    if (!agent) return;
+
+    copilotkit
+      .connectAgent({ agent })
+      .catch(() => {
+        // Some runtimes may not implement explicit connect; allow send flow.
+      })
+      .finally(() => {
+        if (!cancelled) setAgentReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agent, copilotkit]);
+
+  // For fresh server-created chats (single user message, no assistant yet),
+  // replay the user message once via sendMessage so CopilotKit handles follow-up.
+  useEffect(() => {
+    if (!shouldAutoStartFromServer) return;
+    if (!agent || !agentReady || isLoading) return;
+    if (autoStartedRef.current.has(chatID)) return;
+
+    const lastUser = initialMessages[initialMessages.length - 1];
+    autoStartedRef.current.add(chatID);
+    sendMessage({
+      id: crypto.randomUUID(),
+      role: "user",
+      content: lastUser.content,
+      createdAt: new Date(),
+    } as any).catch((err) => {
+      console.error("Failed to auto-start from server user message:", err);
+      autoStartedRef.current.delete(chatID);
+    });
+  }, [
+    chatID,
+    initialMessages,
+    agentReady,
+    isLoading,
+    agent,
+    sendMessage,
+    shouldAutoStartFromServer,
+  ]);
 
   // Save messages when generation completes
   useEffect(() => {
-    // Detect when loading transitions from true to false (generation complete)
     if (wasLoadingRef.current && !isLoading && messages.length > 0) {
-      // Only save if we haven't already saved this set of messages
       const lastMessage = messages[messages.length - 1];
       if (lastMessage?.role === "assistant" && lastMessage?.content && !hasSavedRef.current) {
         hasSavedRef.current = true;
@@ -81,16 +161,68 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
           content: m.content,
           createdAt: m.createdAt,
         }));
-        saveMessages(messagesToSave).then(() => {
-          // Reset flag after a short delay to allow for subsequent saves
-          setTimeout(() => {
-            hasSavedRef.current = false;
-          }, 1000);
-        });
+
+        // Chat always exists by the time the AI responds
+        if (chatID) {
+          updateExistingChat(chatID, messagesToSave).then(() => {
+            setTimeout(() => {
+              hasSavedRef.current = false;
+            }, 1000);
+          });
+        }
       }
     }
     wasLoadingRef.current = isLoading;
-  }, [isLoading, messages, saveMessages]);
+  }, [isLoading, messages, updateExistingChat, chatID]);
+
+  // Detect workflow IDs in assistant messages and track them
+  useEffect(() => {
+    const workflowPattern = /Workflow ID:\s*(organize-library-\d+)/g;
+    for (const message of messages) {
+      if (message.role !== "assistant" || !message.content) continue;
+      const matches = Array.from(
+        (message.content as string).matchAll(workflowPattern),
+      );
+      for (const match of matches) {
+        const workflowId = match[1];
+        if (!trackedWorkflowIdsRef.current.has(workflowId)) {
+          trackedWorkflowIdsRef.current.add(workflowId);
+          trackWorkflow(workflowId);
+        }
+      }
+    }
+  }, [messages, trackWorkflow]);
+
+  // Fetch pending reviews from workflows that have them
+  useEffect(() => {
+    const workflowsWithReviews = activeWorkflows.filter(
+      (w) => w.pendingReviewWorkflows.length > 0,
+    );
+
+    if (workflowsWithReviews.length === 0) {
+      if (pendingReviews.length > 0) setPendingReviews([]);
+      return;
+    }
+
+    const fetchReviews = async () => {
+      const allReviews: Array<{ workflowId: string; reviews: ReviewItem[] }> = [];
+      for (const workflow of workflowsWithReviews) {
+        for (const folderWfId of workflow.pendingReviewWorkflows) {
+          try {
+            const reviews = await getPendingReviews(folderWfId);
+            if (reviews.length > 0) {
+              allReviews.push({ workflowId: folderWfId, reviews });
+            }
+          } catch {
+            // Folder workflow may have completed or not be queryable
+          }
+        }
+      }
+      setPendingReviews(allReviews);
+    };
+
+    fetchReviews();
+  }, [activeWorkflows, pendingReviews.length]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -100,30 +232,56 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
   }, [messages, isLoading]);
 
   const handleSendMessage = useCallback(async (content: string) => {
-    const message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content,
-      createdAt: new Date(),
-    };
-    
-    sendMessage(message as any);
-  }, [sendMessage]);
+    if (chatID === null && messages.length === 0) {
+      // New chat from /new — create in backend first, then navigate.
+      // The /chat/<id> view triggers completion once the thread is active.
+      setIsCreatingChat(true);
+      try {
+        const userMessage = {
+          id: crypto.randomUUID(),
+          role: "user",
+          content,
+          createdAt: new Date(),
+        };
 
-  // Use CopilotKit messages, or initialMessages for first render before CopilotKit syncs
+        // 1. Create in backend first — get the chatID
+        const newChatID = await createNewChat([
+          { id: userMessage.id, role: "user", content },
+        ]);
+        router.push(`/chat/${newChatID}`);
+      } catch (err) {
+        console.error("Failed to create chat:", err);
+      } finally {
+        setIsCreatingChat(false);
+      }
+    } else {
+      // Existing chat: send through CopilotKit normally
+      sendMessage({
+        id: crypto.randomUUID(),
+        role: "user",
+        content,
+        createdAt: new Date(),
+      } as any);
+    }
+  }, [chatID, messages.length, sendMessage, createNewChat, router]);
+
+  // CopilotKit messages take priority; fall back to initialMessages before hydration.
   const messagesToRender = messages.length > 0 ? messages : initialMessages;
 
-  if (messagesToRender.length === 0) {
+  const isBusy = isLoading || isCreatingChat;
+
+  // Welcome view on /new with no messages
+  if (chatID === null && messagesToRender.length === 0) {
     return (
       <div className="flex h-full w-full flex-col bg-background">
-        <WelcomeView onSend={handleSendMessage} isLoading={isLoading} />
+        <WelcomeView onSend={handleSendMessage} isLoading={isBusy} />
       </div>
     );
   }
 
   return (
     <div className="flex h-full w-full flex-col bg-background relative">
-      <div 
+      <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 pb-4"
       >
@@ -131,41 +289,57 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
           {messagesToRender.map((message, index) => {
             const isLastMessage = index === messagesToRender.length - 1;
             const role = (message.role || "").toLowerCase();
-            
+
             if (role === "user") {
               return <CustomUserMessage key={message.id} message={message} />;
             }
-            
+
             if (role === "assistant") {
               return (
-                <CustomAssistantMessage 
-                  key={message.id} 
-                  message={message} 
-                  isLoading={isLastMessage && isLoading} 
+                <CustomAssistantMessage
+                  key={message.id}
+                  message={message}
+                  isLoading={isLastMessage && isLoading}
                 />
               );
             }
-            
+
             return null;
           })}
-          
+
           {isLoading && messagesToRender.length > 0 && messagesToRender[messagesToRender.length - 1].role === "user" && (
-            <CustomAssistantMessage 
+            <CustomAssistantMessage
               message={{
                 id: "temp-thinking",
                 role: "assistant",
                 content: "",
-              }} 
-              isLoading={true} 
+              }}
+              isLoading={true}
             />
+          )}
+
+          {/* HITL Review Cards */}
+          {pendingReviews.length > 0 && (
+            <div className="py-4 max-w-[672px] mx-auto w-full">
+              {pendingReviews.map(({ workflowId, reviews }) => (
+                <ReviewCardList
+                  key={workflowId}
+                  reviews={reviews}
+                  folderWorkflowId={workflowId}
+                />
+              ))}
+            </div>
           )}
         </div>
       </div>
-      
+
+      {/* Workflow Progress Banner */}
+      <WorkflowBanner />
+
       <div className="w-full max-w-[672px] mx-auto">
-        <ImageUploadInput 
-          inProgress={isLoading} 
-          onSend={handleSendMessage} 
+        <ImageUploadInput
+          inProgress={isBusy}
+          onSend={handleSendMessage}
           onStop={stopGeneration}
         />
       </div>

@@ -10,31 +10,24 @@ import {
 } from "react";
 import {
   getChats,
-  getChat,
   createChat,
   updateChat,
-  type Chat,
   type ChatListItem,
   type Message,
 } from "@/app/actions/chat";
 
 interface ChatContextValue {
-  currentChatID: string | null;
-  currentMessages: Message[];
   recentChats: ChatListItem[];
   isLoading: boolean;
   error: string | null;
-  newChat: () => void;
-  selectChat: (chatID: string) => Promise<void>;
-  saveMessages: (messages: Message[]) => Promise<void>;
+  createNewChat: (messages: Message[]) => Promise<string>;
+  updateExistingChat: (chatID: string, messages: Message[]) => Promise<void>;
   refreshChats: () => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const [currentChatID, setCurrentChatID] = useState<string | null>(null);
-  const [currentMessages, setCurrentMessages] = useState<Message[]>([]);
   const [recentChats, setRecentChats] = useState<ChatListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,65 +43,49 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Load chats on mount
   useEffect(() => {
     setIsLoading(true);
     refreshChats().finally(() => setIsLoading(false));
   }, [refreshChats]);
 
-  const newChat = useCallback(() => {
-    setCurrentChatID(null);
-    setCurrentMessages([]);
-  }, []);
-
-  const selectChat = useCallback(async (chatID: string) => {
-    try {
-      setIsLoading(true);
-      const chat = await getChat(chatID);
-      setCurrentChatID(chat._id);
-      setCurrentMessages(chat.messages);
-      setError(null);
-    } catch (err) {
-      console.error("Failed to load chat:", err);
-      setError("Failed to load chat");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const saveMessages = useCallback(
-    async (messages: Message[]) => {
+  const createNewChat = useCallback(
+    async (messages: Message[]): Promise<string> => {
       try {
-        if (currentChatID) {
-          // Update existing chat
-          await updateChat(currentChatID, messages);
-        } else {
-          // Create new chat
-          const newChatData = await createChat(messages);
-          setCurrentChatID(newChatData._id);
-        }
-        // Refresh the chat list to show the new/updated chat
+        const newChatData = await createChat(messages);
+        await refreshChats();
+        setError(null);
+        return newChatData._id;
+      } catch (err) {
+        console.error("Failed to create chat:", err);
+        setError("Failed to save chat");
+        throw err;
+      }
+    },
+    [refreshChats],
+  );
+
+  const updateExistingChat = useCallback(
+    async (chatID: string, messages: Message[]): Promise<void> => {
+      try {
+        await updateChat(chatID, messages);
         await refreshChats();
         setError(null);
       } catch (err) {
-        console.error("Failed to save messages:", err);
+        console.error("Failed to update chat:", err);
         setError("Failed to save chat");
       }
     },
-    [currentChatID, refreshChats]
+    [refreshChats],
   );
 
   return (
     <ChatContext.Provider
       value={{
-        currentChatID,
-        currentMessages,
         recentChats,
         isLoading,
         error,
-        newChat,
-        selectChat,
-        saveMessages,
+        createNewChat,
+        updateExistingChat,
         refreshChats,
       }}
     >
