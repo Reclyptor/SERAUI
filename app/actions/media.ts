@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 
 const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
+const API_PREFIX = "/api/v1";
 
 // ============================================
 // Types
@@ -51,6 +52,15 @@ export interface ProcessFolderProgress {
   pendingReviews: ReviewItem[];
 }
 
+export interface PersistedWorkflowState {
+  workflowId: string;
+  status: "running" | "completed" | "failed" | "unknown" | "canceled";
+  progress: Record<string, unknown> | null;
+  pendingReviewWorkflows: string[];
+  startedAt: string;
+  lastSyncedAt: string;
+}
+
 export interface ReviewDecision {
   reviewItemId: string;
   approved: boolean;
@@ -76,7 +86,7 @@ async function fetchWithAuth(
 ): Promise<Response> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}${path}`, {
     ...options,
     headers: {
       Cookie: cookieHeader,
@@ -106,7 +116,7 @@ async function fetchWithAuth(
 export async function getWorkflowDescription(
   workflowId: string,
 ): Promise<WorkflowDescription> {
-  const response = await fetchWithAuth(`/media/workflows/${workflowId}`);
+  const response = await fetchWithAuth(`/workflows/${workflowId}`);
   return response.json();
 }
 
@@ -116,9 +126,7 @@ export async function getWorkflowDescription(
 export async function getWorkflowProgress(
   workflowId: string,
 ): Promise<OrganizeLibraryProgress> {
-  const response = await fetchWithAuth(
-    `/media/workflows/${workflowId}/progress`,
-  );
+  const response = await fetchWithAuth(`/workflows/${workflowId}/progress`);
   return response.json();
 }
 
@@ -128,9 +136,7 @@ export async function getWorkflowProgress(
 export async function getFolderProgress(
   workflowId: string,
 ): Promise<ProcessFolderProgress> {
-  const response = await fetchWithAuth(
-    `/media/workflows/folder/${workflowId}/progress`,
-  );
+  const response = await fetchWithAuth(`/workflows/folder/${workflowId}/progress`);
   return response.json();
 }
 
@@ -140,9 +146,7 @@ export async function getFolderProgress(
 export async function getPendingReviews(
   workflowId: string,
 ): Promise<ReviewItem[]> {
-  const response = await fetchWithAuth(
-    `/media/workflows/folder/${workflowId}/reviews`,
-  );
+  const response = await fetchWithAuth(`/workflows/folder/${workflowId}/reviews`);
   return response.json();
 }
 
@@ -153,12 +157,32 @@ export async function submitReviewDecision(
   workflowId: string,
   decision: ReviewDecision,
 ): Promise<{ success: boolean }> {
-  const response = await fetchWithAuth(
-    `/media/workflows/folder/${workflowId}/reviews`,
-    {
-      method: "POST",
-      body: JSON.stringify(decision),
-    },
-  );
+  const response = await fetchWithAuth(`/workflows/folder/${workflowId}/reviews`, {
+    method: "POST",
+    body: JSON.stringify(decision),
+  });
+  return response.json();
+}
+
+/**
+ * Get persisted workflow state for a chat thread.
+ */
+export async function getThreadWorkflowState(
+  threadId: string,
+): Promise<PersistedWorkflowState[]> {
+  const response = await fetchWithAuth(`/workflows/thread/${threadId}/state`);
+  return response.json();
+}
+
+/**
+ * Cancel a tracked workflow in a given chat thread.
+ */
+export async function cancelThreadWorkflow(
+  threadId: string,
+  workflowId: string,
+): Promise<{ success: boolean }> {
+  const response = await fetchWithAuth(`/workflows/thread/${threadId}/${workflowId}/cancel`, {
+    method: "POST",
+  });
   return response.json();
 }

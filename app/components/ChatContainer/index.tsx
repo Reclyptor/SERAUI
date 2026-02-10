@@ -17,7 +17,7 @@ export function ChatContainer({
   initialWorkflowState = [],
 }: ChatContainerProps) {
   return (
-    <CopilotKit runtimeUrl="/api/copilotkit" agent="SERA">
+    <CopilotKit runtimeUrl="/api/v1/copilotkit" agent="SERA">
       <SeraChat
         chatID={chatID}
         initialMessages={initialMessages}

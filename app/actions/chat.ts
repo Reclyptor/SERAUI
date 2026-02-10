@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 
 // Derive base URL from the CopilotKit runtime URL (strip /copilotkit suffix)
 const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
+const API_PREFIX = "/api/v1";
 
 export interface Message {
   id: string;
@@ -51,7 +52,7 @@ async function getCookieHeader(): Promise<string> {
 export async function getChats(): Promise<ChatListItem[]> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/chats`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats`, {
     headers: {
       Cookie: cookieHeader,
     },
@@ -68,7 +69,7 @@ export async function getChats(): Promise<ChatListItem[]> {
 export async function getChat(chatID: string): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}`, {
     headers: {
       Cookie: cookieHeader,
     },
@@ -88,7 +89,7 @@ export async function createChat(
 ): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/chats`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats`, {
     method: "POST",
     headers: {
       Cookie: cookieHeader,
@@ -111,7 +112,7 @@ export async function updateChat(
 ): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}`, {
     method: "PATCH",
     headers: {
       Cookie: cookieHeader,
@@ -133,7 +134,7 @@ export async function updateChatWorkflowState(
 ): Promise<Chat | null> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/chats/${chatID}/workflow-state`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}/workflow-state`, {
     method: "PATCH",
     headers: {
       Cookie: cookieHeader,
@@ -157,7 +158,7 @@ export async function updateChatWorkflowState(
 export async function deleteChat(chatID: string): Promise<void> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}`, {
     method: "DELETE",
     headers: {
       Cookie: cookieHeader,
@@ -172,7 +173,7 @@ export async function deleteChat(chatID: string): Promise<void> {
 export async function uploadImage(formData: FormData): Promise<{ imageID: string }> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}/copilotkit/upload-image`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/copilotkit/upload-image`, {
     method: "POST",
     headers: {
       Cookie: cookieHeader,

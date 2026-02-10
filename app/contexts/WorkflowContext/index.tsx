@@ -11,7 +11,10 @@ import {
   type ReactNode,
 } from "react";
 import { io, type Socket } from "socket.io-client";
-import { type OrganizeLibraryProgress } from "@/app/actions/media";
+import {
+  cancelThreadWorkflow,
+  type OrganizeLibraryProgress,
+} from "@/app/actions/media";
 
 // ============================================
 // Types
@@ -62,7 +65,7 @@ interface WorkflowContextValue {
 
 const WorkflowContext = createContext<WorkflowContextValue | null>(null);
 
-const WORKFLOW_WS_NAMESPACE = "/media-workflows";
+const WORKFLOW_WS_NAMESPACE = "/workflows";
 
 interface WorkflowUpdateEvent {
   threadId: string;
@@ -99,6 +102,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancelWorkflow = useCallback((workflowId: string) => {
+    const threadId = currentThreadIdRef.current;
     setActiveWorkflows((prev) =>
       prev.map((workflow) =>
         workflow.workflowId === workflowId
@@ -106,6 +110,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
           : workflow,
       ),
     );
+    if (!threadId) return;
+    void cancelThreadWorkflow(threadId, workflowId).catch(() => {
+      // Keep optimistic UI state; next backend event will reconcile if needed.
+    });
   }, []);
 
   const restoreWorkflows = useCallback((workflows: PersistedWorkflowState[]) => {

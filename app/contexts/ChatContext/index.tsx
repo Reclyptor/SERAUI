@@ -12,7 +12,6 @@ import {
   getChats,
   createChat,
   updateChat,
-  updateChatWorkflowState,
   type ChatListItem,
   type Message,
   type WorkflowStateEntry,
@@ -30,10 +29,6 @@ interface ChatContextValue {
     chatID: string,
     messages: Message[],
     workflowState?: WorkflowStateEntry[],
-  ) => Promise<void>;
-  updateChatWorkflowSnapshot: (
-    chatID: string,
-    workflowState: WorkflowStateEntry[],
   ) => Promise<void>;
   refreshChats: () => Promise<void>;
 }
@@ -98,20 +93,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [refreshChats],
   );
 
-  const updateChatWorkflowSnapshot = useCallback(
-    async (chatID: string, workflowState: WorkflowStateEntry[]): Promise<void> => {
-      try {
-        const updated = await updateChatWorkflowState(chatID, workflowState);
-        if (!updated) return;
-        setError(null);
-      } catch (err) {
-        console.error("Failed to persist workflow state:", err);
-        setError("Failed to persist workflow state");
-      }
-    },
-    [],
-  );
-
   return (
     <ChatContext.Provider
       value={{
@@ -120,7 +101,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         error,
         createNewChat,
         updateExistingChat,
-        updateChatWorkflowSnapshot,
         refreshChats,
       }}
     >

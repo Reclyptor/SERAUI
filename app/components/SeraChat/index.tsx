@@ -17,7 +17,7 @@ import {
   type PersistedWorkflowState,
 } from "../../contexts/WorkflowContext";
 import { getPendingReviews, type ReviewItem } from "@/app/actions/media";
-import type { Message, WorkflowStateEntry } from "@/app/actions/chat";
+import type { Message } from "@/app/actions/chat";
 
 interface SeraChatProps {
   chatID: string | null;
@@ -77,17 +77,13 @@ export function SeraChat({
   } = useCopilotChatInternal({});
   const { copilotkit } = useCopilotKit();
   const router = useRouter();
-  const { createNewChat, updateExistingChat, updateChatWorkflowSnapshot } = useChat();
+  const { createNewChat, updateExistingChat } = useChat();
   const { setCurrentThread, activeWorkflows, restoreWorkflows } = useWorkflows();
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const hydratedRef = useRef(false);
-  const workflowPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const lastWorkflowPersistKeyRef = useRef<string>("");
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [agentReady, setAgentReady] = useState(false);
   const [pendingReviews, setPendingReviews] = useState<
@@ -117,24 +113,6 @@ export function SeraChat({
     restoreWorkflows(initialWorkflowState);
   }, [chatID, initialWorkflowState, restoreWorkflows]);
 
-  // Seed persistence dedupe key from server snapshot so opening a chat does not
-  // immediately POST unchanged workflow state back to the backend.
-  useEffect(() => {
-    if (!chatID) {
-      lastWorkflowPersistKeyRef.current = "";
-      return;
-    }
-    const initialKey = JSON.stringify(
-      initialWorkflowState.map((w) => ({
-        workflowId: w.workflowId,
-        status: w.status,
-        progress: w.progress ?? null,
-        pendingReviewWorkflows: w.pendingReviewWorkflows ?? [],
-        startedAt: new Date(w.startedAt).toISOString(),
-      })),
-    );
-    lastWorkflowPersistKeyRef.current = initialKey;
-  }, [chatID, initialWorkflowState]);
 
   // Subscribe workflow updates to the current chat thread.
   useEffect(() => {
@@ -216,50 +194,6 @@ export function SeraChat({
     }
     wasLoadingRef.current = isLoading;
   }, [isLoading, messages, updateExistingChat, chatID]);
-
-  // Persist last known workflow snapshot while chat is active so refresh/restore
-  // can show current known status immediately before polling catches up.
-  useEffect(() => {
-    if (!chatID) return;
-    const canonicalSnapshot = activeWorkflows.map((w) => ({
-      workflowId: w.workflowId,
-      status: w.status,
-      progress: w.progress as Record<string, unknown> | null,
-      pendingReviewWorkflows: w.pendingReviewWorkflows,
-      startedAt: w.startedAt.toISOString(),
-    }));
-    const persistKey = JSON.stringify(canonicalSnapshot);
-    if (persistKey === lastWorkflowPersistKeyRef.current) return;
-
-    if (workflowPersistTimerRef.current) {
-      clearTimeout(workflowPersistTimerRef.current);
-    }
-    workflowPersistTimerRef.current = setTimeout(() => {
-      const snapshot: WorkflowStateEntry[] = canonicalSnapshot.map((w) => ({
-        ...w,
-        lastSyncedAt: new Date().toISOString(),
-      }));
-      lastWorkflowPersistKeyRef.current = persistKey;
-      updateChatWorkflowSnapshot(chatID, snapshot);
-      workflowPersistTimerRef.current = null;
-    }, 350);
-
-    return () => {
-      if (workflowPersistTimerRef.current) {
-        clearTimeout(workflowPersistTimerRef.current);
-        workflowPersistTimerRef.current = null;
-      }
-    };
-  }, [chatID, activeWorkflows, updateChatWorkflowSnapshot]);
-
-  useEffect(() => {
-    return () => {
-      if (workflowPersistTimerRef.current) {
-        clearTimeout(workflowPersistTimerRef.current);
-        workflowPersistTimerRef.current = null;
-      }
-    };
-  }, []);
 
   // Fetch pending reviews from workflows that have them.
   // Keep this effect keyed only on workflow state to avoid
