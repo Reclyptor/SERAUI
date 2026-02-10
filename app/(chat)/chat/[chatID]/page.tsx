@@ -11,7 +11,13 @@ export default async function ChatPage({
 
   try {
     const chat = await getChat(chatID);
-    return <ChatContainer chatID={chat._id} initialMessages={chat.messages} />;
+    return (
+      <ChatContainer
+        chatID={chat._id}
+        initialMessages={chat.messages}
+        initialWorkflowState={chat.workflowState ?? []}
+      />
+    );
   } catch {
     redirect("/new");
   }

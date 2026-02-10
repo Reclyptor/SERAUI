@@ -12,11 +12,21 @@ export interface Message {
   createdAt?: Date;
 }
 
+export interface WorkflowStateEntry {
+  workflowId: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  progress: Record<string, unknown> | null;
+  pendingReviewWorkflows: string[];
+  startedAt: string;
+  lastSyncedAt: string;
+}
+
 export interface Chat {
   _id: string;
   userID: string;
   title: string;
   messages: Message[];
+  workflowState?: WorkflowStateEntry[];
   createdAt: string;
   updatedAt: string;
 }
@@ -72,7 +82,10 @@ export async function getChat(chatID: string): Promise<Chat> {
   return response.json();
 }
 
-export async function createChat(messages: Message[]): Promise<Chat> {
+export async function createChat(
+  messages: Message[],
+  workflowState?: WorkflowStateEntry[],
+): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats`, {
@@ -81,7 +94,7 @@ export async function createChat(messages: Message[]): Promise<Chat> {
       Cookie: cookieHeader,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, workflowState }),
   });
 
   if (!response.ok) {
@@ -91,7 +104,11 @@ export async function createChat(messages: Message[]): Promise<Chat> {
   return response.json();
 }
 
-export async function updateChat(chatID: string, messages: Message[]): Promise<Chat> {
+export async function updateChat(
+  chatID: string,
+  messages: Message[],
+  workflowState?: WorkflowStateEntry[],
+): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats/${chatID}`, {
@@ -100,11 +117,33 @@ export async function updateChat(chatID: string, messages: Message[]): Promise<C
       Cookie: cookieHeader,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, workflowState }),
   });
 
   if (!response.ok) {
     throw new Error(`Failed to update chat: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function updateChatWorkflowState(
+  chatID: string,
+  workflowState: WorkflowStateEntry[],
+): Promise<Chat> {
+  const cookieHeader = await getCookieHeader();
+
+  const response = await fetch(`${API_BASE_URL}/chats/${chatID}/workflow-state`, {
+    method: "PATCH",
+    headers: {
+      Cookie: cookieHeader,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ workflowState }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update workflow state: ${response.statusText}`);
   }
 
   return response.json();

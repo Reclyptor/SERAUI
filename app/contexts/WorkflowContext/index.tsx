@@ -7,15 +7,11 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useMemo,
   type ReactNode,
 } from "react";
-import {
-  getWorkflowProgress,
-  getWorkflowDescription,
-  type OrganizeLibraryProgress,
-  type ReviewItem,
-  type WorkflowDescription,
-} from "@/app/actions/media";
+import { io, type Socket } from "socket.io-client";
+import { type OrganizeLibraryProgress } from "@/app/actions/media";
 
 // ============================================
 // Types
@@ -30,6 +26,15 @@ export interface ActiveWorkflow {
   pendingReviewWorkflows: string[];
 }
 
+export interface PersistedWorkflowState {
+  workflowId: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  progress: Record<string, unknown> | null;
+  pendingReviewWorkflows: string[];
+  startedAt: string | Date;
+  lastSyncedAt: string | Date;
+}
+
 interface WorkflowContextValue {
   /** Currently tracked workflows */
   activeWorkflows: ActiveWorkflow[];
@@ -37,6 +42,10 @@ interface WorkflowContextValue {
   trackWorkflow: (workflowId: string) => void;
   /** Remove a workflow from tracking */
   untrackWorkflow: (workflowId: string) => void;
+  /** Remove workflows that are no longer running */
+  clearTerminalWorkflows: () => void;
+  /** Restore workflows from persisted snapshot */
+  restoreWorkflows: (workflows: PersistedWorkflowState[]) => void;
   /** Whether any workflows are currently active */
   hasActiveWorkflows: boolean;
   /** Total pending review count across all workflows */
@@ -53,14 +62,38 @@ interface WorkflowContextValue {
 
 const WorkflowContext = createContext<WorkflowContextValue | null>(null);
 
-const POLL_INTERVAL_MS = 5000;
+const WORKFLOW_WS_NAMESPACE = "/media-workflows";
+
+interface WorkflowUpdateEvent {
+  workflowId: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  progress: OrganizeLibraryProgress | null;
+  pendingReviewWorkflows: string[];
+  lastSyncedAt: string;
+}
+
+function getWorkflowSocketUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_SERA_WS_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+
+  const apiBase =
+    process.env.NEXT_PUBLIC_SERA_API_URL?.trim() || "http://localhost:3001";
+  return apiBase.replace(/\/+$/, "");
+}
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [activeWorkflows, setActiveWorkflows] = useState<ActiveWorkflow[]>([]);
   const [isBannerExpanded, setIsBannerExpanded] = useState(false);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeWorkflowsRef = useRef<ActiveWorkflow[]>([]);
+  const socketRef = useRef<Socket | null>(null);
+  const dismissedWorkflowIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    activeWorkflowsRef.current = activeWorkflows;
+  }, [activeWorkflows]);
 
   const trackWorkflow = useCallback((workflowId: string) => {
+    if (dismissedWorkflowIdsRef.current.has(workflowId)) return;
     setActiveWorkflows((prev) => {
       // Don't add duplicates
       if (prev.some((w) => w.workflowId === workflowId)) return prev;
@@ -78,65 +111,100 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const untrackWorkflow = useCallback((workflowId: string) => {
+    dismissedWorkflowIdsRef.current.add(workflowId);
     setActiveWorkflows((prev) =>
       prev.filter((w) => w.workflowId !== workflowId),
     );
+  }, []);
+
+  const clearTerminalWorkflows = useCallback(() => {
+    setActiveWorkflows((prev) => {
+      for (const workflow of prev) {
+        if (workflow.status !== "running") {
+          dismissedWorkflowIdsRef.current.add(workflow.workflowId);
+        }
+      }
+      return prev.filter((w) => w.status === "running");
+    });
+  }, []);
+
+  const restoreWorkflows = useCallback((workflows: PersistedWorkflowState[]) => {
+    if (!workflows || workflows.length === 0) return;
+    for (const workflow of workflows) {
+      dismissedWorkflowIdsRef.current.delete(workflow.workflowId);
+    }
+    setActiveWorkflows((prev) => {
+      const merged = [...prev];
+      for (const persisted of workflows) {
+        const idx = merged.findIndex((w) => w.workflowId === persisted.workflowId);
+        const restored: ActiveWorkflow = {
+          workflowId: persisted.workflowId,
+          status: persisted.status,
+          progress: (persisted.progress as OrganizeLibraryProgress | null) ?? null,
+          pendingReviewWorkflows: persisted.pendingReviewWorkflows ?? [],
+          startedAt: new Date(persisted.startedAt),
+        };
+        if (idx === -1) {
+          merged.push(restored);
+        } else {
+          merged[idx] = { ...merged[idx], ...restored };
+        }
+      }
+      return merged;
+    });
   }, []);
 
   const toggleBanner = useCallback(() => {
     setIsBannerExpanded((prev) => !prev);
   }, []);
 
-  // Poll active workflows for progress
-  const pollWorkflows = useCallback(async () => {
-    setActiveWorkflows((prev) => {
-      // Only poll if there are active workflows
-      const running = prev.filter(
-        (w) => w.status === "running" || w.status === "unknown",
-      );
-      if (running.length === 0) return prev;
-
-      // Trigger async updates
-      for (const workflow of running) {
-        pollSingleWorkflow(workflow.workflowId).then((update) => {
-          if (update) {
-            setActiveWorkflows((current) =>
-              current.map((w) =>
-                w.workflowId === update.workflowId
-                  ? { ...w, ...update }
-                  : w,
-              ),
-            );
-          }
-        });
-      }
-
-      return prev;
-    });
-  }, []);
-
-  // Start/stop polling based on active workflows
+  // Keep a websocket open for push-based workflow state updates.
   useEffect(() => {
-    const hasRunning = activeWorkflows.some(
-      (w) => w.status === "running" || w.status === "unknown",
-    );
+    const socket = io(getWorkflowSocketUrl() + WORKFLOW_WS_NAMESPACE, {
+      withCredentials: true,
+      transports: ["websocket"],
+    });
+    socketRef.current = socket;
 
-    if (hasRunning && !pollIntervalRef.current) {
-      // Poll immediately, then on interval
-      pollWorkflows();
-      pollIntervalRef.current = setInterval(pollWorkflows, POLL_INTERVAL_MS);
-    } else if (!hasRunning && pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
+    const onConnect = () => {
+      socket.emit("subscribe_workflows", {
+        workflowIds: activeWorkflowsRef.current.map((w) => w.workflowId),
+      });
+    };
+    const onUpdate = (update: WorkflowUpdateEvent) => {
+      setActiveWorkflows((prev) => {
+        const idx = prev.findIndex((w) => w.workflowId === update.workflowId);
+        if (idx === -1) return prev;
+        const next = [...prev];
+        next[idx] = {
+          ...next[idx],
+          status: update.status,
+          progress: update.progress,
+          pendingReviewWorkflows: update.pendingReviewWorkflows,
+        };
+        return next;
+      });
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("workflow_update", onUpdate);
 
     return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
+      socket.off("connect", onConnect);
+      socket.off("workflow_update", onUpdate);
+      socket.disconnect();
+      socketRef.current = null;
     };
-  }, [activeWorkflows, pollWorkflows]);
+  }, []);
+
+  // Keep server-side subscription set in sync with workflows tracked by UI.
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !socket.connected) return;
+    socket.emit("subscribe_workflows", {
+      workflowIds: activeWorkflows.map((w) => w.workflowId),
+    });
+  }, [activeWorkflows]);
 
   const hasActiveWorkflows = activeWorkflows.length > 0;
   const totalPendingReviews = activeWorkflows.reduce(
@@ -150,6 +218,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         activeWorkflows,
         trackWorkflow,
         untrackWorkflow,
+        clearTerminalWorkflows,
+        restoreWorkflows,
         hasActiveWorkflows,
         totalPendingReviews,
         isBannerExpanded,
@@ -167,54 +237,4 @@ export function useWorkflows() {
     throw new Error("useWorkflows must be used within a WorkflowProvider");
   }
   return context;
-}
-
-// ============================================
-// Polling Helper
-// ============================================
-
-async function pollSingleWorkflow(
-  workflowId: string,
-): Promise<Partial<ActiveWorkflow> & { workflowId: string } | null> {
-  try {
-    // First check if the workflow is still running
-    const description = await getWorkflowDescription(workflowId);
-    const isRunning = description.status === "RUNNING";
-
-    // Get progress data
-    const progress = await getWorkflowProgress(workflowId);
-
-    // Find folders with pending reviews
-    const pendingReviewWorkflows = Object.entries(
-      progress.folderStatuses,
-    )
-      .filter(([, status]) => status === "awaiting_review")
-      .map(
-        ([folderName]) => `process-folder-${sanitizeWorkflowId(folderName)}`,
-      );
-
-    return {
-      workflowId,
-      status: isRunning
-        ? "running"
-        : description.status === "COMPLETED"
-          ? "completed"
-          : "failed",
-      progress,
-      pendingReviewWorkflows,
-    };
-  } catch {
-    // Workflow may have been terminated or not found
-    return {
-      workflowId,
-      status: "unknown",
-    };
-  }
-}
-
-function sanitizeWorkflowId(name: string): string {
-  return name
-    .replace(/[^a-zA-Z0-9_-]/g, "-")
-    .replace(/-+/g, "-")
-    .slice(0, 200);
 }

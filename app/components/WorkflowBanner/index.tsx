@@ -2,7 +2,14 @@
 
 import { useMemo } from "react";
 import clsx from "clsx";
-import { ChevronUp, Loader2, CheckCircle2, XCircle, Clock, AlertTriangle } from "lucide-react";
+import {
+  ChevronUp,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  AlertTriangle,
+} from "lucide-react";
 import { useWorkflows, type ActiveWorkflow } from "../../contexts/WorkflowContext";
 
 const STATUS_CONFIG: Record<
@@ -104,12 +111,18 @@ export function WorkflowBanner() {
     hasActiveWorkflows,
     isBannerExpanded,
     toggleBanner,
+    clearTerminalWorkflows,
   } = useWorkflows();
+
+  const workflowsWithProgress = useMemo(
+    () => activeWorkflows.filter((workflow) => workflow.progress !== null),
+    [activeWorkflows],
+  );
 
   // Collect all folder statuses for expanded view
   const folderStatuses = useMemo(() => {
     const statuses: Array<{ folderName: string; status: string }> = [];
-    for (const workflow of activeWorkflows) {
+    for (const workflow of workflowsWithProgress) {
       if (workflow.progress?.folderStatuses) {
         for (const [name, status] of Object.entries(
           workflow.progress.folderStatuses,
@@ -134,31 +147,72 @@ export function WorkflowBanner() {
       (a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2),
     );
     return statuses;
-  }, [activeWorkflows]);
+  }, [workflowsWithProgress]);
 
-  if (!hasActiveWorkflows) return null;
+  const hasInProgressWork = useMemo(() => {
+    return workflowsWithProgress.some((workflow) => {
+      if (!workflow.progress?.folderStatuses) return false;
+      return Object.values(workflow.progress.folderStatuses).some((status) =>
+        ["pending", "scanning", "extracting", "matching", "renaming", "moving"].includes(status),
+      );
+    });
+  }, [workflowsWithProgress]);
+
+  const terminalWorkflowCount = useMemo(
+    () => activeWorkflows.filter((workflow) => workflow.status !== "running").length,
+    [activeWorkflows],
+  );
+
+  if (!hasActiveWorkflows || workflowsWithProgress.length === 0) return null;
+
+  const SummaryIcon = hasInProgressWork ? Loader2 : CheckCircle2;
 
   return (
     <div className="w-full max-w-[672px] mx-auto px-4">
       <div className="bg-background-secondary border border-border rounded-xl overflow-hidden">
         {/* Summary bar */}
-        <button
-          onClick={toggleBanner}
-          className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-background-tertiary/50 transition-colors"
-        >
+        <div className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-background-tertiary/50 transition-colors">
           <div className="flex items-center gap-2 min-w-0">
-            <Loader2 className="w-3.5 h-3.5 text-accent animate-spin shrink-0" />
-            {activeWorkflows.map((workflow) => (
+            <SummaryIcon
+              className={clsx(
+                "w-3.5 h-3.5 shrink-0",
+                hasInProgressWork ? "text-accent animate-spin" : "text-emerald-400",
+              )}
+            />
+            {workflowsWithProgress.map((workflow) => (
               <WorkflowSummary key={workflow.workflowId} workflow={workflow} />
             ))}
           </div>
-          <ChevronUp
-            className={clsx(
-              "w-4 h-4 text-foreground-muted shrink-0 transition-transform duration-200 ml-2",
-              isBannerExpanded ? "rotate-0" : "rotate-180",
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            {terminalWorkflowCount > 0 && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  clearTerminalWorkflows();
+                }}
+                className="text-xs px-2 py-1 rounded-md border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary"
+              >
+                Clear done
+              </button>
             )}
-          />
-        </button>
+            <button
+              type="button"
+              onClick={toggleBanner}
+              className="p-1 rounded-md hover:bg-background-tertiary"
+              aria-label={
+                isBannerExpanded ? "Collapse workflow details" : "Expand workflow details"
+              }
+            >
+              <ChevronUp
+                className={clsx(
+                  "w-4 h-4 text-foreground-muted transition-transform duration-200",
+                  isBannerExpanded ? "rotate-0" : "rotate-180",
+                )}
+              />
+            </button>
+          </div>
+        </div>
 
         {/* Expanded folder list */}
         <div

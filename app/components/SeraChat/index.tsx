@@ -12,13 +12,17 @@ import { WorkflowBanner } from "../WorkflowBanner";
 import { ReviewCardList } from "../ReviewCard";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import { useChat } from "../../contexts/ChatContext";
-import { useWorkflows } from "../../contexts/WorkflowContext";
+import {
+  useWorkflows,
+  type PersistedWorkflowState,
+} from "../../contexts/WorkflowContext";
 import { getPendingReviews, type ReviewItem } from "@/app/actions/media";
-import type { Message } from "@/app/actions/chat";
+import type { Message, WorkflowStateEntry } from "@/app/actions/chat";
 
 interface SeraChatProps {
   chatID: string | null;
   initialMessages: Message[];
+  initialWorkflowState?: PersistedWorkflowState[];
 }
 
 function CustomUserMessage({ message }: { message: any }) {
@@ -58,7 +62,11 @@ function CustomAssistantMessage({ message, isLoading }: { message: any, isLoadin
   );
 }
 
-export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
+export function SeraChat({
+  chatID,
+  initialMessages,
+  initialWorkflowState = [],
+}: SeraChatProps) {
   const {
     messages = [],
     sendMessage,
@@ -69,14 +77,13 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
   } = useCopilotChatInternal({});
   const { copilotkit } = useCopilotKit();
   const router = useRouter();
-  const { createNewChat, updateExistingChat } = useChat();
-  const { trackWorkflow, activeWorkflows } = useWorkflows();
+  const { createNewChat, updateExistingChat, updateChatWorkflowSnapshot } = useChat();
+  const { trackWorkflow, activeWorkflows, restoreWorkflows } = useWorkflows();
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const hydratedRef = useRef(false);
-  const trackedWorkflowIdsRef = useRef<Set<string>>(new Set());
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [agentReady, setAgentReady] = useState(false);
   const [pendingReviews, setPendingReviews] = useState<
@@ -99,6 +106,12 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
     }
     hydratedRef.current = true;
   }, [initialMessages, setMessages, shouldAutoStartFromServer]);
+
+  // Restore persisted workflow state when opening an existing chat.
+  useEffect(() => {
+    if (!chatID || initialWorkflowState.length === 0) return;
+    restoreWorkflows(initialWorkflowState);
+  }, [chatID, initialWorkflowState, restoreWorkflows]);
 
   // Explicitly connect the current agent to avoid first-run races where
   // sendMessage is called before runtime connection is ready.
@@ -175,32 +188,52 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
     wasLoadingRef.current = isLoading;
   }, [isLoading, messages, updateExistingChat, chatID]);
 
-  // Detect workflow IDs in assistant messages and track them
+  // Persist last known workflow snapshot while chat is active so refresh/restore
+  // can show current known status immediately before polling catches up.
   useEffect(() => {
-    const workflowPattern = /Workflow ID:\s*(organize-library-\d+)/g;
-    for (const message of messages) {
+    if (!chatID) return;
+    const snapshot: WorkflowStateEntry[] = activeWorkflows.map((w) => ({
+      workflowId: w.workflowId,
+      status: w.status,
+      progress: w.progress as Record<string, unknown> | null,
+      pendingReviewWorkflows: w.pendingReviewWorkflows,
+      startedAt: w.startedAt.toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+    }));
+
+    updateChatWorkflowSnapshot(chatID, snapshot);
+  }, [chatID, activeWorkflows, updateChatWorkflowSnapshot]);
+
+  const trackWorkflowIdsFromMessages = useCallback((sourceMessages: any[]) => {
+    const workflowPattern = /Workflow ID:\s*([a-zA-Z0-9._:-]+)/g;
+    for (const message of sourceMessages) {
       if (message.role !== "assistant" || !message.content) continue;
       const matches = Array.from(
         (message.content as string).matchAll(workflowPattern),
       );
       for (const match of matches) {
         const workflowId = match[1];
-        if (!trackedWorkflowIdsRef.current.has(workflowId)) {
-          trackedWorkflowIdsRef.current.add(workflowId);
-          trackWorkflow(workflowId);
-        }
+        trackWorkflow(workflowId);
       }
     }
-  }, [messages, trackWorkflow]);
+  }, [trackWorkflow]);
 
-  // Fetch pending reviews from workflows that have them
+  // Track workflow IDs from live assistant messages only. Persisted workflow
+  // snapshots are the source of truth when reopening chats.
+  useEffect(() => {
+    trackWorkflowIdsFromMessages(messages as any[]);
+  }, [messages, trackWorkflowIdsFromMessages]);
+
+  // Fetch pending reviews from workflows that have them.
+  // Keep this effect keyed only on workflow state to avoid
+  // self-triggering loops via pendingReviews updates.
   useEffect(() => {
     const workflowsWithReviews = activeWorkflows.filter(
       (w) => w.pendingReviewWorkflows.length > 0,
     );
 
     if (workflowsWithReviews.length === 0) {
-      if (pendingReviews.length > 0) setPendingReviews([]);
+      setPendingReviews((prev) => (prev.length === 0 ? prev : []));
       return;
     }
 
@@ -218,11 +251,17 @@ export function SeraChat({ chatID, initialMessages }: SeraChatProps) {
           }
         }
       }
-      setPendingReviews(allReviews);
+
+      // Avoid unnecessary state updates that can cause render churn.
+      setPendingReviews((prev) => {
+        const prevSerialized = JSON.stringify(prev);
+        const nextSerialized = JSON.stringify(allReviews);
+        return prevSerialized === nextSerialized ? prev : allReviews;
+      });
     };
 
     fetchReviews();
-  }, [activeWorkflows, pendingReviews.length]);
+  }, [activeWorkflows]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
