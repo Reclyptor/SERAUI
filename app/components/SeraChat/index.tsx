@@ -16,7 +16,10 @@ import {
   useWorkflows,
   type PersistedWorkflowState,
 } from "../../contexts/WorkflowContext";
-import { getPendingReviews, type ReviewItem } from "@/app/actions/media";
+import {
+  getPendingReviews,
+  type ReviewItem,
+} from "@/app/actions/media";
 import type { Message } from "@/app/actions/chat";
 
 interface SeraChatProps {
@@ -113,7 +116,6 @@ export function SeraChat({
     restoreWorkflows(initialWorkflowState);
   }, [chatID, initialWorkflowState, restoreWorkflows]);
 
-
   // Subscribe workflow updates to the current chat thread.
   useEffect(() => {
     setCurrentThread(chatID);
@@ -196,8 +198,6 @@ export function SeraChat({
   }, [isLoading, messages, updateExistingChat, chatID]);
 
   // Fetch pending reviews from workflows that have them.
-  // Keep this effect keyed only on workflow state to avoid
-  // self-triggering loops via pendingReviews updates.
   useEffect(() => {
     const workflowsWithReviews = activeWorkflows.filter(
       (w) =>
@@ -226,7 +226,6 @@ export function SeraChat({
         }
       }
 
-      // Avoid unnecessary state updates that can cause render churn.
       setPendingReviews((prev) => {
         const prevSerialized = JSON.stringify(prev);
         const nextSerialized = JSON.stringify(allReviews);
@@ -247,19 +246,10 @@ export function SeraChat({
   const handleSendMessage = useCallback(async (content: string) => {
     if (chatID === null && messages.length === 0) {
       // New chat from /new — create in backend first, then navigate.
-      // The /chat/<id> view triggers completion once the thread is active.
       setIsCreatingChat(true);
       try {
-        const userMessage = {
-          id: crypto.randomUUID(),
-          role: "user",
-          content,
-          createdAt: new Date(),
-        };
-
-        // 1. Create in backend first — get the chatID
         const newChatID = await createNewChat([
-          { id: userMessage.id, role: "user", content },
+          { id: crypto.randomUUID(), role: "user", content },
         ]);
         router.push(`/chat/${newChatID}`);
       } catch (err) {
@@ -268,7 +258,8 @@ export function SeraChat({
         setIsCreatingChat(false);
       }
     } else {
-      // Existing chat: send through CopilotKit normally
+      // Existing chat: send through CopilotKit normally.
+      // Workflow triggering is handled by the AI agent via CopilotKit actions.
       sendMessage({
         id: crypto.randomUUID(),
         role: "user",

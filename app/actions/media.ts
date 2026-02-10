@@ -24,6 +24,25 @@ export interface OrganizeLibraryProgress {
   foldersInProgress: number;
   foldersPendingReview: number;
   folderStatuses: Record<string, string>;
+  workflowStage:
+    | "copying"
+    | "detecting"
+    | "extracting"
+    | "matching"
+    | "awaiting_review"
+    | "renaming"
+    | "structuring"
+    | "awaiting_finalize"
+    | "finalizing"
+    | "completed"
+    | "failed"
+    | "canceled";
+  selectedSeriesRoot: string;
+  expectedCoreEpisodeCount: number;
+  resolvedCoreEpisodeCount: number;
+  unresolvedCoreEpisodeCount: number;
+  canFinalize: boolean;
+  awaitingFinalApproval: boolean;
 }
 
 export interface AnimeEpisode {
@@ -64,7 +83,21 @@ export interface PersistedWorkflowState {
 export interface ReviewDecision {
   reviewItemId: string;
   approved: boolean;
+  correctedSeasonNumber?: number;
   correctedEpisodeNumber?: number;
+}
+
+export interface FileTreeNode {
+  name: string;
+  type: "file" | "directory";
+  relativePath: string;
+  size?: number;
+  children?: FileTreeNode[];
+}
+
+export interface SeriesRoot {
+  name: string;
+  path: string;
 }
 
 // ============================================
@@ -184,5 +217,38 @@ export async function cancelThreadWorkflow(
   const response = await fetchWithAuth(`/workflows/thread/${threadId}/${workflowId}/cancel`, {
     method: "POST",
   });
+  return response.json();
+}
+
+export async function listSeriesRoots(): Promise<SeriesRoot[]> {
+  const response = await fetchWithAuth("/workflows/series-roots");
+  return response.json();
+}
+
+export async function startThreadWorkflow(
+  threadId: string,
+  seriesRootPath: string,
+): Promise<{ workflowId: string; message: string }> {
+  const response = await fetchWithAuth(`/workflows/thread/${threadId}/start`, {
+    method: "POST",
+    body: JSON.stringify({ seriesRootPath }),
+  });
+  return response.json();
+}
+
+export async function finalizeThreadWorkflow(
+  threadId: string,
+  workflowId: string,
+): Promise<{ success: boolean }> {
+  const response = await fetchWithAuth(`/workflows/thread/${threadId}/${workflowId}/finalize`, {
+    method: "POST",
+  });
+  return response.json();
+}
+
+export async function getStagingTree(
+  workflowId: string,
+): Promise<FileTreeNode[]> {
+  const response = await fetchWithAuth(`/workflows/${workflowId}/staging-tree`);
   return response.json();
 }

@@ -43,6 +43,8 @@ interface WorkflowContextValue {
   activeWorkflows: ActiveWorkflow[];
   /** Bind workflow updates to a specific chat/thread */
   setCurrentThread: (threadId: string | null) => void;
+  /** Currently selected chat/thread ID */
+  currentThreadId: string | null;
   /** Cancel a specific tracked workflow */
   cancelWorkflow: (workflowId: string) => void;
   /** Remove workflows that are no longer running */
@@ -232,6 +234,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       value={{
         activeWorkflows,
         setCurrentThread,
+        currentThreadId,
         cancelWorkflow,
         clearTerminalWorkflows,
         restoreWorkflows,

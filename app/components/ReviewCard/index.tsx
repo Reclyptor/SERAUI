@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { Check, X, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   submitReviewDecision,
   type ReviewItem,
@@ -42,7 +42,7 @@ export function ReviewCard({
 }: ReviewCardProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResolved, setIsResolved] = useState(false);
-  const [resolvedAction, setResolvedAction] = useState<"approved" | "skipped" | null>(null);
+  const [resolvedAction, setResolvedAction] = useState<"approved" | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState(
     review.suggestedEpisodeNumber,
   );
@@ -71,38 +71,16 @@ export function ReviewCard({
     }
   };
 
-  const handleSkip = async () => {
-    setIsSubmitting(true);
-    try {
-      await submitReviewDecision(folderWorkflowId, {
-        reviewItemId: review.id,
-        approved: false,
-      });
-      setIsResolved(true);
-      setResolvedAction("skipped");
-      onResolved?.();
-    } catch (error) {
-      console.error("Failed to submit review:", error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   if (isResolved) {
     return (
       <div className="bg-background-secondary border border-border rounded-xl px-4 py-3 opacity-60">
         <div className="flex items-center gap-2 text-xs text-foreground-muted">
-          {resolvedAction === "approved" ? (
+          {resolvedAction === "approved" && (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-400" />
               <span>
                 Approved: {review.fileName} as Episode {selectedEpisode}
               </span>
-            </>
-          ) : (
-            <>
-              <X className="w-3.5 h-3.5 text-foreground-muted" />
-              <span>Skipped: {review.fileName}</span>
             </>
           )}
         </div>
@@ -205,14 +183,6 @@ export function ReviewCard({
           >
             <Check className="w-3.5 h-3.5" />
             <span>Approve</span>
-          </button>
-          <button
-            onClick={handleSkip}
-            disabled={isSubmitting}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-background-tertiary hover:bg-background-tertiary/80 text-foreground-muted text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
-          >
-            <X className="w-3.5 h-3.5" />
-            <span>Skip</span>
           </button>
         </div>
       </div>

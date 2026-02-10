@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   ChevronUp,
@@ -9,8 +9,11 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
+  Eye,
 } from "lucide-react";
 import { useWorkflows, type ActiveWorkflow } from "../../contexts/WorkflowContext";
+import { finalizeThreadWorkflow } from "@/app/actions/media";
+import { StagingTreeModal } from "../StagingTreeModal";
 
 const STATUS_CONFIG: Record<
   string,
@@ -71,8 +74,20 @@ function WorkflowSummary({ workflow }: { workflow: ActiveWorkflow }) {
   const { progress } = workflow;
   if (!progress) return null;
 
-  const { totalFolders, foldersCompleted, foldersFailed, foldersPendingReview } =
-    progress;
+  const {
+    totalFolders,
+    foldersCompleted,
+    foldersFailed,
+    foldersPendingReview,
+    expectedCoreEpisodeCount,
+    resolvedCoreEpisodeCount,
+    unresolvedCoreEpisodeCount,
+    workflowStage,
+  } = progress;
+  const expectedEpisodes = expectedCoreEpisodeCount ?? 0;
+  const resolvedEpisodes = resolvedCoreEpisodeCount ?? 0;
+  const unresolvedEpisodes = unresolvedCoreEpisodeCount ?? 0;
+  const stageLabel = (workflowStage ?? "running").replaceAll("_", " ");
 
   const percentage =
     totalFolders > 0
@@ -95,6 +110,15 @@ function WorkflowSummary({ workflow }: { workflow: ActiveWorkflow }) {
           {foldersPendingReview} reviews
         </span>
       )}
+      <span className="tabular-nums">
+        episodes {resolvedEpisodes}/{expectedEpisodes}
+      </span>
+      {unresolvedEpisodes > 0 && (
+        <span className="text-amber-400 tabular-nums">
+          {unresolvedEpisodes} unresolved
+        </span>
+      )}
+      <span className="capitalize">{stageLabel}</span>
       <div className="flex-1 h-1 bg-background-tertiary rounded-full overflow-hidden min-w-[60px] max-w-[120px]">
         <div
           className="h-full bg-accent rounded-full transition-all duration-500"
@@ -109,12 +133,15 @@ function WorkflowSummary({ workflow }: { workflow: ActiveWorkflow }) {
 export function WorkflowBanner() {
   const {
     activeWorkflows,
+    currentThreadId,
     hasActiveWorkflows,
     isBannerExpanded,
     toggleBanner,
     cancelWorkflow,
     clearTerminalWorkflows,
   } = useWorkflows();
+
+  const [reviewingWorkflowId, setReviewingWorkflowId] = useState<string | null>(null);
 
   const workflowsWithProgress = useMemo(
     () => activeWorkflows.filter((workflow) => workflow.progress !== null),
@@ -179,110 +206,166 @@ export function WorkflowBanner() {
     [activeWorkflows],
   );
 
+  const finalizableWorkflows = useMemo(
+    () =>
+      activeWorkflows.filter(
+        (workflow) =>
+          workflow.status === "running" &&
+          workflow.progress?.canFinalize &&
+          workflow.progress?.awaitingFinalApproval,
+      ),
+    [activeWorkflows],
+  );
+
   if (!hasActiveWorkflows) return null;
 
   const SummaryIcon = hasInProgressWork ? Loader2 : CheckCircle2;
 
   return (
-    <div className="w-full max-w-[672px] mx-auto px-4">
-      <div className="bg-background-secondary border border-border rounded-xl overflow-hidden">
-        {/* Summary bar */}
-        <div className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-background-tertiary/50 transition-colors">
-          <div className="flex items-center gap-2 min-w-0">
-            <SummaryIcon
-              className={clsx(
-                "w-3.5 h-3.5 shrink-0",
-                hasInProgressWork ? "text-accent animate-spin" : "text-emerald-400",
-              )}
-            />
-            {workflowsWithProgress.length > 0 ? (
-              workflowsWithProgress.map((workflow) => (
-                <WorkflowSummary key={workflow.workflowId} workflow={workflow} />
-              ))
-            ) : (
-              <span className="text-xs text-foreground-muted">
-                Workflow tracked (waiting for progress updates)
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2">
-            {terminalWorkflowCount > 0 && (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  clearTerminalWorkflows();
-                }}
-                className="text-xs px-2 py-1 rounded-md border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary"
-              >
-                Clear done
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={toggleBanner}
-              className="p-1 rounded-md hover:bg-background-tertiary"
-              aria-label={
-                isBannerExpanded ? "Collapse workflow details" : "Expand workflow details"
-              }
-            >
-              <ChevronUp
+    <>
+      <div className="w-full max-w-[672px] mx-auto px-4">
+        <div className="bg-background-secondary border border-border rounded-xl overflow-hidden">
+          {/* Summary bar */}
+          <div className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-background-tertiary/50 transition-colors">
+            <div className="flex items-center gap-2 min-w-0">
+              <SummaryIcon
                 className={clsx(
-                  "w-4 h-4 text-foreground-muted transition-transform duration-200",
-                  isBannerExpanded ? "rotate-0" : "rotate-180",
+                  "w-3.5 h-3.5 shrink-0",
+                  hasInProgressWork ? "text-accent animate-spin" : "text-emerald-400",
                 )}
               />
-            </button>
-          </div>
-        </div>
-
-        {/* Expanded folder list */}
-        <div
-          className={clsx(
-            "grid transition-[grid-template-rows] duration-200 ease-in-out",
-            isBannerExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-          )}
-        >
-          <div className="min-h-0 overflow-hidden">
-            <div className="border-t border-border px-3 py-2 max-h-[200px] overflow-y-auto">
-              {cancellableWorkflows.length > 0 && (
-                <div className="space-y-1 mb-2 pb-2 border-b border-border">
-                  {cancellableWorkflows.map((workflow) => (
-                    <div
-                      key={workflow.workflowId}
-                      className="flex items-center justify-between text-xs px-1 py-1"
-                    >
-                      <span className="text-foreground-muted truncate max-w-[240px]">
-                        {workflow.workflowId}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => cancelWorkflow(workflow.workflowId)}
-                        className="px-2 py-0.5 rounded border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {folderStatuses.length === 0 ? (
-                <div className="text-xs text-foreground-muted py-2 text-center">
-                  Waiting for workflow progress updates...
-                </div>
-              ) : (
-                folderStatuses.map(({ folderName, status }) => (
-                  <FolderStatusRow
-                    key={folderName}
-                    folderName={folderName}
-                    status={status}
-                  />
+              {workflowsWithProgress.length > 0 ? (
+                workflowsWithProgress.map((workflow) => (
+                  <WorkflowSummary key={workflow.workflowId} workflow={workflow} />
                 ))
+              ) : (
+                <span className="text-xs text-foreground-muted">
+                  Workflow tracked (waiting for progress updates)
+                </span>
               )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0 ml-2">
+              {terminalWorkflowCount > 0 && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    clearTerminalWorkflows();
+                  }}
+                  className="text-xs px-2 py-1 rounded-md border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary"
+                >
+                  Clear done
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={toggleBanner}
+                className="p-1 rounded-md hover:bg-background-tertiary"
+                aria-label={
+                  isBannerExpanded ? "Collapse workflow details" : "Expand workflow details"
+                }
+              >
+                <ChevronUp
+                  className={clsx(
+                    "w-4 h-4 text-foreground-muted transition-transform duration-200",
+                    isBannerExpanded ? "rotate-0" : "rotate-180",
+                  )}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Expanded folder list */}
+          <div
+            className={clsx(
+              "grid transition-[grid-template-rows] duration-200 ease-in-out",
+              isBannerExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+            )}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <div className="border-t border-border px-3 py-2 max-h-[200px] overflow-y-auto">
+                {cancellableWorkflows.length > 0 && (
+                  <div className="space-y-1 mb-2 pb-2 border-b border-border">
+                    {cancellableWorkflows.map((workflow) => (
+                      <div
+                        key={workflow.workflowId}
+                        className="flex items-center justify-between text-xs px-1 py-1"
+                      >
+                        <span className="text-foreground-muted truncate max-w-[240px]">
+                          {workflow.workflowId}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => cancelWorkflow(workflow.workflowId)}
+                          className="px-2 py-0.5 rounded border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {finalizableWorkflows.length > 0 && (
+                  <div className="space-y-1 mb-2 pb-2 border-b border-border">
+                    {finalizableWorkflows.map((workflow) => (
+                      <div
+                        key={`finalize-${workflow.workflowId}`}
+                        className="flex items-center justify-between text-xs px-1 py-1"
+                      >
+                        <span className="text-foreground-muted truncate max-w-[180px]">
+                          Ready to finalize: {workflow.workflowId}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setReviewingWorkflowId(workflow.workflowId)}
+                            className="px-2 py-0.5 rounded border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary flex items-center gap-1"
+                          >
+                            <Eye className="w-3 h-3" />
+                            Review
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!currentThreadId) return;
+                              void finalizeThreadWorkflow(currentThreadId, workflow.workflowId);
+                            }}
+                            className="px-2 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10"
+                          >
+                            Finalize
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {folderStatuses.length === 0 ? (
+                  <div className="text-xs text-foreground-muted py-2 text-center">
+                    Waiting for workflow progress updates...
+                  </div>
+                ) : (
+                  folderStatuses.map(({ folderName, status }) => (
+                    <FolderStatusRow
+                      key={folderName}
+                      folderName={folderName}
+                      status={status}
+                    />
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Staging Tree Review Modal */}
+      {reviewingWorkflowId && (
+        <StagingTreeModal
+          isOpen={true}
+          onClose={() => setReviewingWorkflowId(null)}
+          workflowId={reviewingWorkflowId}
+        />
+      )}
+    </>
   );
 }
