@@ -19,7 +19,7 @@ import { type OrganizeLibraryProgress } from "@/app/actions/media";
 
 export interface ActiveWorkflow {
   workflowId: string;
-  status: "running" | "completed" | "failed" | "unknown";
+  status: "running" | "completed" | "failed" | "unknown" | "canceled";
   progress: OrganizeLibraryProgress | null;
   startedAt: Date;
   /** Folder workflow IDs that have pending reviews */
@@ -28,7 +28,7 @@ export interface ActiveWorkflow {
 
 export interface PersistedWorkflowState {
   workflowId: string;
-  status: "running" | "completed" | "failed" | "unknown";
+  status: "running" | "completed" | "failed" | "unknown" | "canceled";
   progress: Record<string, unknown> | null;
   pendingReviewWorkflows: string[];
   startedAt: string | Date;
@@ -38,10 +38,10 @@ export interface PersistedWorkflowState {
 interface WorkflowContextValue {
   /** Currently tracked workflows */
   activeWorkflows: ActiveWorkflow[];
-  /** Add a workflow to track by ID */
-  trackWorkflow: (workflowId: string) => void;
-  /** Remove a workflow from tracking */
-  untrackWorkflow: (workflowId: string) => void;
+  /** Bind workflow updates to a specific chat/thread */
+  setCurrentThread: (threadId: string | null) => void;
+  /** Cancel a specific tracked workflow */
+  cancelWorkflow: (workflowId: string) => void;
   /** Remove workflows that are no longer running */
   clearTerminalWorkflows: () => void;
   /** Restore workflows from persisted snapshot */
@@ -65,8 +65,9 @@ const WorkflowContext = createContext<WorkflowContextValue | null>(null);
 const WORKFLOW_WS_NAMESPACE = "/media-workflows";
 
 interface WorkflowUpdateEvent {
+  threadId: string;
   workflowId: string;
-  status: "running" | "completed" | "failed" | "unknown";
+  status: "running" | "completed" | "failed" | "unknown" | "canceled";
   progress: OrganizeLibraryProgress | null;
   pendingReviewWorkflows: string[];
   lastSyncedAt: string;
@@ -84,55 +85,31 @@ function getWorkflowSocketUrl(): string {
 export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [activeWorkflows, setActiveWorkflows] = useState<ActiveWorkflow[]>([]);
   const [isBannerExpanded, setIsBannerExpanded] = useState(false);
-  const activeWorkflowsRef = useRef<ActiveWorkflow[]>([]);
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
-  const dismissedWorkflowIdsRef = useRef<Set<string>>(new Set());
+  const currentThreadIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    activeWorkflowsRef.current = activeWorkflows;
-  }, [activeWorkflows]);
-
-  const trackWorkflow = useCallback((workflowId: string) => {
-    if (dismissedWorkflowIdsRef.current.has(workflowId)) return;
-    setActiveWorkflows((prev) => {
-      // Don't add duplicates
-      if (prev.some((w) => w.workflowId === workflowId)) return prev;
-      return [
-        ...prev,
-        {
-          workflowId,
-          status: "running",
-          progress: null,
-          startedAt: new Date(),
-          pendingReviewWorkflows: [],
-        },
-      ];
-    });
-  }, []);
-
-  const untrackWorkflow = useCallback((workflowId: string) => {
-    dismissedWorkflowIdsRef.current.add(workflowId);
+  const clearTerminalWorkflows = useCallback(() => {
     setActiveWorkflows((prev) =>
-      prev.filter((w) => w.workflowId !== workflowId),
+      prev.filter(
+        (workflow) =>
+          workflow.status === "running" || workflow.status === "unknown",
+      ),
     );
   }, []);
 
-  const clearTerminalWorkflows = useCallback(() => {
-    setActiveWorkflows((prev) => {
-      for (const workflow of prev) {
-        if (workflow.status !== "running") {
-          dismissedWorkflowIdsRef.current.add(workflow.workflowId);
-        }
-      }
-      return prev.filter((w) => w.status === "running");
-    });
+  const cancelWorkflow = useCallback((workflowId: string) => {
+    setActiveWorkflows((prev) =>
+      prev.map((workflow) =>
+        workflow.workflowId === workflowId
+          ? { ...workflow, status: "canceled", pendingReviewWorkflows: [] }
+          : workflow,
+      ),
+    );
   }, []);
 
   const restoreWorkflows = useCallback((workflows: PersistedWorkflowState[]) => {
     if (!workflows || workflows.length === 0) return;
-    for (const workflow of workflows) {
-      dismissedWorkflowIdsRef.current.delete(workflow.workflowId);
-    }
     setActiveWorkflows((prev) => {
       const merged = [...prev];
       for (const persisted of workflows) {
@@ -158,6 +135,20 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setIsBannerExpanded((prev) => !prev);
   }, []);
 
+  const setCurrentThread = useCallback((threadId: string | null) => {
+    const previous = currentThreadIdRef.current;
+    const next = threadId ?? null;
+    const socket = socketRef.current;
+    if (socket?.connected && previous && previous !== next) {
+      socket.emit("unsubscribe_thread", { threadId: previous });
+    }
+    currentThreadIdRef.current = next;
+    setCurrentThreadId(next);
+    if (next === null) {
+      setActiveWorkflows([]);
+    }
+  }, []);
+
   // Keep a websocket open for push-based workflow state updates.
   useEffect(() => {
     const socket = io(getWorkflowSocketUrl() + WORKFLOW_WS_NAMESPACE, {
@@ -167,14 +158,29 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     socketRef.current = socket;
 
     const onConnect = () => {
-      socket.emit("subscribe_workflows", {
-        workflowIds: activeWorkflowsRef.current.map((w) => w.workflowId),
-      });
+      const threadId = currentThreadIdRef.current;
+      if (!threadId) return;
+      socket.emit("subscribe_thread", { threadId });
     };
     const onUpdate = (update: WorkflowUpdateEvent) => {
+      const threadId = currentThreadIdRef.current;
+      if (!threadId || update.threadId !== threadId) return;
+
       setActiveWorkflows((prev) => {
         const idx = prev.findIndex((w) => w.workflowId === update.workflowId);
-        if (idx === -1) return prev;
+        if (idx === -1) {
+          return [
+            ...prev,
+            {
+              workflowId: update.workflowId,
+              status: update.status,
+              progress: update.progress,
+              pendingReviewWorkflows: update.pendingReviewWorkflows,
+              startedAt: new Date(update.lastSyncedAt),
+            },
+          ];
+        }
+        if (prev[idx].status === "canceled") return prev;
         const next = [...prev];
         next[idx] = {
           ...next[idx],
@@ -197,18 +203,19 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Keep server-side subscription set in sync with workflows tracked by UI.
   useEffect(() => {
+    currentThreadIdRef.current = currentThreadId;
     const socket = socketRef.current;
     if (!socket || !socket.connected) return;
-    socket.emit("subscribe_workflows", {
-      workflowIds: activeWorkflows.map((w) => w.workflowId),
-    });
-  }, [activeWorkflows]);
+    if (currentThreadId) {
+      socket.emit("subscribe_thread", { threadId: currentThreadId });
+    }
+  }, [currentThreadId]);
 
   const hasActiveWorkflows = activeWorkflows.length > 0;
   const totalPendingReviews = activeWorkflows.reduce(
-    (sum, w) => sum + (w.progress?.foldersPendingReview ?? 0),
+    (sum, w) =>
+      w.status === "canceled" ? sum : sum + (w.progress?.foldersPendingReview ?? 0),
     0,
   );
 
@@ -216,8 +223,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     <WorkflowContext.Provider
       value={{
         activeWorkflows,
-        trackWorkflow,
-        untrackWorkflow,
+        setCurrentThread,
+        cancelWorkflow,
         clearTerminalWorkflows,
         restoreWorkflows,
         hasActiveWorkflows,

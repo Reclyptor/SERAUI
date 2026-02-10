@@ -101,7 +101,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const updateChatWorkflowSnapshot = useCallback(
     async (chatID: string, workflowState: WorkflowStateEntry[]): Promise<void> => {
       try {
-        await updateChatWorkflowState(chatID, workflowState);
+        const updated = await updateChatWorkflowState(chatID, workflowState);
+        if (!updated) return;
         setError(null);
       } catch (err) {
         console.error("Failed to persist workflow state:", err);

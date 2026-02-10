@@ -14,7 +14,7 @@ export interface Message {
 
 export interface WorkflowStateEntry {
   workflowId: string;
-  status: "running" | "completed" | "failed" | "unknown";
+  status: "running" | "completed" | "failed" | "unknown" | "canceled";
   progress: Record<string, unknown> | null;
   pendingReviewWorkflows: string[];
   startedAt: string;
@@ -130,7 +130,7 @@ export async function updateChat(
 export async function updateChatWorkflowState(
   chatID: string,
   workflowState: WorkflowStateEntry[],
-): Promise<Chat> {
+): Promise<Chat | null> {
   const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}/chats/${chatID}/workflow-state`, {
@@ -143,7 +143,12 @@ export async function updateChatWorkflowState(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to update workflow state: ${response.statusText}`);
+    const details = await response.text().catch(() => "");
+    console.error(
+      `Failed to update workflow state (${response.status} ${response.statusText})`,
+      details,
+    );
+    return null;
   }
 
   return response.json();

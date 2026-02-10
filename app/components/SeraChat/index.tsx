@@ -78,12 +78,16 @@ export function SeraChat({
   const { copilotkit } = useCopilotKit();
   const router = useRouter();
   const { createNewChat, updateExistingChat, updateChatWorkflowSnapshot } = useChat();
-  const { trackWorkflow, activeWorkflows, restoreWorkflows } = useWorkflows();
+  const { setCurrentThread, activeWorkflows, restoreWorkflows } = useWorkflows();
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const hydratedRef = useRef(false);
+  const workflowPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const lastWorkflowPersistKeyRef = useRef<string>("");
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [agentReady, setAgentReady] = useState(false);
   const [pendingReviews, setPendingReviews] = useState<
@@ -112,6 +116,31 @@ export function SeraChat({
     if (!chatID || initialWorkflowState.length === 0) return;
     restoreWorkflows(initialWorkflowState);
   }, [chatID, initialWorkflowState, restoreWorkflows]);
+
+  // Seed persistence dedupe key from server snapshot so opening a chat does not
+  // immediately POST unchanged workflow state back to the backend.
+  useEffect(() => {
+    if (!chatID) {
+      lastWorkflowPersistKeyRef.current = "";
+      return;
+    }
+    const initialKey = JSON.stringify(
+      initialWorkflowState.map((w) => ({
+        workflowId: w.workflowId,
+        status: w.status,
+        progress: w.progress ?? null,
+        pendingReviewWorkflows: w.pendingReviewWorkflows ?? [],
+        startedAt: new Date(w.startedAt).toISOString(),
+      })),
+    );
+    lastWorkflowPersistKeyRef.current = initialKey;
+  }, [chatID, initialWorkflowState]);
+
+  // Subscribe workflow updates to the current chat thread.
+  useEffect(() => {
+    setCurrentThread(chatID);
+    return () => setCurrentThread(null);
+  }, [chatID, setCurrentThread]);
 
   // Explicitly connect the current agent to avoid first-run races where
   // sendMessage is called before runtime connection is ready.
@@ -192,44 +221,55 @@ export function SeraChat({
   // can show current known status immediately before polling catches up.
   useEffect(() => {
     if (!chatID) return;
-    const snapshot: WorkflowStateEntry[] = activeWorkflows.map((w) => ({
+    const canonicalSnapshot = activeWorkflows.map((w) => ({
       workflowId: w.workflowId,
       status: w.status,
       progress: w.progress as Record<string, unknown> | null,
       pendingReviewWorkflows: w.pendingReviewWorkflows,
       startedAt: w.startedAt.toISOString(),
-      lastSyncedAt: new Date().toISOString(),
     }));
+    const persistKey = JSON.stringify(canonicalSnapshot);
+    if (persistKey === lastWorkflowPersistKeyRef.current) return;
 
-    updateChatWorkflowSnapshot(chatID, snapshot);
+    if (workflowPersistTimerRef.current) {
+      clearTimeout(workflowPersistTimerRef.current);
+    }
+    workflowPersistTimerRef.current = setTimeout(() => {
+      const snapshot: WorkflowStateEntry[] = canonicalSnapshot.map((w) => ({
+        ...w,
+        lastSyncedAt: new Date().toISOString(),
+      }));
+      lastWorkflowPersistKeyRef.current = persistKey;
+      updateChatWorkflowSnapshot(chatID, snapshot);
+      workflowPersistTimerRef.current = null;
+    }, 350);
+
+    return () => {
+      if (workflowPersistTimerRef.current) {
+        clearTimeout(workflowPersistTimerRef.current);
+        workflowPersistTimerRef.current = null;
+      }
+    };
   }, [chatID, activeWorkflows, updateChatWorkflowSnapshot]);
 
-  const trackWorkflowIdsFromMessages = useCallback((sourceMessages: any[]) => {
-    const workflowPattern = /Workflow ID:\s*([a-zA-Z0-9._:-]+)/g;
-    for (const message of sourceMessages) {
-      if (message.role !== "assistant" || !message.content) continue;
-      const matches = Array.from(
-        (message.content as string).matchAll(workflowPattern),
-      );
-      for (const match of matches) {
-        const workflowId = match[1];
-        trackWorkflow(workflowId);
-      }
-    }
-  }, [trackWorkflow]);
-
-  // Track workflow IDs from live assistant messages only. Persisted workflow
-  // snapshots are the source of truth when reopening chats.
   useEffect(() => {
-    trackWorkflowIdsFromMessages(messages as any[]);
-  }, [messages, trackWorkflowIdsFromMessages]);
+    return () => {
+      if (workflowPersistTimerRef.current) {
+        clearTimeout(workflowPersistTimerRef.current);
+        workflowPersistTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch pending reviews from workflows that have them.
   // Keep this effect keyed only on workflow state to avoid
   // self-triggering loops via pendingReviews updates.
   useEffect(() => {
     const workflowsWithReviews = activeWorkflows.filter(
-      (w) => w.pendingReviewWorkflows.length > 0,
+      (w) =>
+        w.status !== "canceled" &&
+        (w.status === "running" || w.status === "unknown") &&
+        w.pendingReviewWorkflows.length > 0,
     );
 
     if (workflowsWithReviews.length === 0) {

@@ -32,6 +32,7 @@ const STATUS_CONFIG: Record<
     label: "Done",
     color: "text-emerald-400",
   },
+  canceled: { icon: XCircle, label: "Canceled", color: "text-foreground-muted" },
   failed: { icon: XCircle, label: "Failed", color: "text-red-400" },
 };
 
@@ -111,6 +112,7 @@ export function WorkflowBanner() {
     hasActiveWorkflows,
     isBannerExpanded,
     toggleBanner,
+    cancelWorkflow,
     clearTerminalWorkflows,
   } = useWorkflows();
 
@@ -159,11 +161,25 @@ export function WorkflowBanner() {
   }, [workflowsWithProgress]);
 
   const terminalWorkflowCount = useMemo(
-    () => activeWorkflows.filter((workflow) => workflow.status !== "running").length,
+    () =>
+      activeWorkflows.filter(
+        (workflow) =>
+          workflow.status === "completed" ||
+          workflow.status === "failed" ||
+          workflow.status === "canceled",
+      ).length,
     [activeWorkflows],
   );
 
-  if (!hasActiveWorkflows || workflowsWithProgress.length === 0) return null;
+  const cancellableWorkflows = useMemo(
+    () =>
+      activeWorkflows.filter(
+        (workflow) => workflow.status === "running" || workflow.status === "unknown",
+      ),
+    [activeWorkflows],
+  );
+
+  if (!hasActiveWorkflows) return null;
 
   const SummaryIcon = hasInProgressWork ? Loader2 : CheckCircle2;
 
@@ -179,9 +195,15 @@ export function WorkflowBanner() {
                 hasInProgressWork ? "text-accent animate-spin" : "text-emerald-400",
               )}
             />
-            {workflowsWithProgress.map((workflow) => (
-              <WorkflowSummary key={workflow.workflowId} workflow={workflow} />
-            ))}
+            {workflowsWithProgress.length > 0 ? (
+              workflowsWithProgress.map((workflow) => (
+                <WorkflowSummary key={workflow.workflowId} workflow={workflow} />
+              ))
+            ) : (
+              <span className="text-xs text-foreground-muted">
+                Workflow tracked (waiting for progress updates)
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
             {terminalWorkflowCount > 0 && (
@@ -223,9 +245,30 @@ export function WorkflowBanner() {
         >
           <div className="min-h-0 overflow-hidden">
             <div className="border-t border-border px-3 py-2 max-h-[200px] overflow-y-auto">
+              {cancellableWorkflows.length > 0 && (
+                <div className="space-y-1 mb-2 pb-2 border-b border-border">
+                  {cancellableWorkflows.map((workflow) => (
+                    <div
+                      key={workflow.workflowId}
+                      className="flex items-center justify-between text-xs px-1 py-1"
+                    >
+                      <span className="text-foreground-muted truncate max-w-[240px]">
+                        {workflow.workflowId}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => cancelWorkflow(workflow.workflowId)}
+                        className="px-2 py-0.5 rounded border border-border text-foreground-muted hover:text-foreground hover:bg-background-tertiary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {folderStatuses.length === 0 ? (
                 <div className="text-xs text-foreground-muted py-2 text-center">
-                  Scanning directories...
+                  Waiting for workflow progress updates...
                 </div>
               ) : (
                 folderStatuses.map(({ folderName, status }) => (
