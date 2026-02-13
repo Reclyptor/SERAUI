@@ -17,27 +17,78 @@ export interface WorkflowDescription {
   taskQueue: string;
 }
 
+export type WorkflowStage =
+  | "copying"
+  | "fetching_metadata"
+  | "processing_folders"
+  | "structuring"
+  | "awaiting_finalize"
+  | "finalizing"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export type FolderStatus =
+  | "pending"
+  | "scanning"
+  | "extracting"
+  | "matching"
+  | "renaming"
+  | "awaiting_detection_review"
+  | "awaiting_review"
+  | "completed"
+  | "failed";
+
+export interface CopyProgress {
+  totalFiles: number;
+  filesCopied: number;
+  totalBytes: number;
+  bytesCopied: number;
+  currentFiles: string[];
+  currentFileSizes: number[];
+}
+
+export interface MetadataSummary {
+  status:
+    | "searching"
+    | "found"
+    | "traversing"
+    | "fetching_episodes"
+    | "complete";
+  seriesName?: string;
+  seasonCount?: number;
+  seasons?: Array<{
+    seasonNumber: number;
+    title: string;
+    episodeCount: number;
+  }>;
+  totalEpisodes?: number;
+}
+
+export interface StructuringProgress {
+  totalFiles: number;
+  filesStructured: number;
+  currentFile?: string;
+}
+
+export interface OutputProgress {
+  totalFiles: number;
+  filesCopied: number;
+  currentFiles: string[];
+}
+
 export interface OrganizeLibraryProgress {
+  workflowStage: WorkflowStage;
+  copyProgress?: CopyProgress;
+  metadataSummary?: MetadataSummary;
+  structuringProgress?: StructuringProgress;
+  outputProgress?: OutputProgress;
   totalFolders: number;
   foldersCompleted: number;
   foldersFailed: number;
   foldersInProgress: number;
   foldersPendingReview: number;
-  folderStatuses: Record<string, string>;
-  workflowStage:
-    | "copying"
-    | "detecting"
-    | "extracting"
-    | "matching"
-    | "awaiting_review"
-    | "renaming"
-    | "structuring"
-    | "awaiting_finalize"
-    | "finalizing"
-    | "completed"
-    | "failed"
-    | "canceled";
-  selectedSeriesRoot: string;
+  folderStatuses: Record<string, FolderStatus>;
   expectedCoreEpisodeCount: number;
   resolvedCoreEpisodeCount: number;
   unresolvedCoreEpisodeCount: number;
@@ -65,10 +116,24 @@ export interface ReviewItem {
 
 export interface ProcessFolderProgress {
   folderName: string;
-  status: string;
-  totalFiles: number;
-  filesProcessed: number;
+  status: FolderStatus;
+  totalVideoFiles?: number;
+  detectedEpisodeCount?: number;
+  detectionConfidence?: "high" | "medium" | "low";
+  totalEpisodeFiles?: number;
+  subtitlesExtracted?: number;
+  currentFile?: string;
+  matchesFound?: number;
+  totalToMatch?: number;
+  episodesCopied?: number;
+  totalEpisodesToCopy?: number;
   pendingReviews: ReviewItem[];
+}
+
+export interface DetectionConfirmation {
+  confirmed: boolean;
+  addedPaths?: string[];
+  removedPaths?: string[];
 }
 
 export interface PersistedWorkflowState {
@@ -239,10 +304,29 @@ export async function startThreadWorkflow(
 export async function finalizeThreadWorkflow(
   threadId: string,
   workflowId: string,
+  approved: boolean = true,
 ): Promise<{ success: boolean }> {
-  const response = await fetchWithAuth(`/workflows/thread/${threadId}/${workflowId}/finalize`, {
-    method: "POST",
-  });
+  const response = await fetchWithAuth(
+    `/workflows/thread/${threadId}/${workflowId}/finalize`,
+    {
+      method: "POST",
+      body: JSON.stringify({ approved }),
+    },
+  );
+  return response.json();
+}
+
+export async function confirmDetection(
+  folderWorkflowId: string,
+  confirmation: DetectionConfirmation,
+): Promise<{ success: boolean }> {
+  const response = await fetchWithAuth(
+    `/workflows/folder/${folderWorkflowId}/confirm-detection`,
+    {
+      method: "POST",
+      body: JSON.stringify(confirmation),
+    },
+  );
   return response.json();
 }
 

@@ -36,3 +36,12 @@
 *::-webkit-scrollbar-thumb:hover {
   background: #4d4a47;
 }
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

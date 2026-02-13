@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { CopilotKit } from "@copilotkit/react-core";
 import { SeraChat } from "../SeraChat";
 import { WorkflowSidebar } from "../WorkflowSidebar";
@@ -20,9 +20,19 @@ export function ChatContainer({
   initialWorkflowState = [],
 }: ChatContainerProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const appendMessageRef = useRef<(msg: Message) => void>(undefined);
 
   const openSidebar = useCallback(() => setIsSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
+
+  const handleWorkflowStarted = useCallback((seriesName: string) => {
+    appendMessageRef.current?.({
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: `Perfect! Let's organize **${seriesName}**! The workflow has been started — I'll keep you updated on the progress.`,
+      createdAt: new Date(),
+    });
+  }, []);
 
   return (
     <CopilotKit runtimeUrl="/api/v1/copilotkit" agent="SERA">
@@ -33,12 +43,14 @@ export function ChatContainer({
             chatID={chatID}
             initialMessages={initialMessages}
             initialWorkflowState={initialWorkflowState}
+            appendMessageRef={appendMessageRef}
           />
         </div>
         <WorkflowSidebar
           isOpen={isSidebarOpen}
           onClose={closeSidebar}
           chatID={chatID}
+          onWorkflowStarted={handleWorkflowStarted}
         />
       </div>
     </CopilotKit>

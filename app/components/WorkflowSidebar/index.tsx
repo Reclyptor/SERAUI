@@ -10,25 +10,30 @@ import {
   XCircle,
   Play,
   AlertTriangle,
+  ThumbsDown,
 } from "lucide-react";
-import { useWorkflows } from "../../contexts/WorkflowContext";
+import { useWorkflows, type ActiveWorkflow } from "../../contexts/WorkflowContext";
 import {
   listSeriesRoots,
   startThreadWorkflow,
   finalizeThreadWorkflow,
   type SeriesRoot,
+  type OrganizeLibraryProgress,
+  type WorkflowStage,
 } from "@/app/actions/media";
 
 interface WorkflowSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   chatID: string | null;
+  onWorkflowStarted?: (seriesName: string) => void;
 }
 
 export function WorkflowSidebar({
   isOpen,
   onClose,
   chatID,
+  onWorkflowStarted,
 }: WorkflowSidebarProps) {
   const {
     activeWorkflows,
@@ -44,7 +49,6 @@ export function WorkflowSidebar({
     new Set(),
   );
 
-  // Fetch series roots when sidebar opens
   useEffect(() => {
     if (!isOpen) return;
     setIsLoadingRoots(true);
@@ -54,19 +58,6 @@ export function WorkflowSidebar({
       .finally(() => setIsLoadingRoots(false));
   }, [isOpen]);
 
-  // Determine which series paths already have active (non-terminal) workflows
-  const activeSeriesPaths = useMemo(() => {
-    const paths = new Set<string>();
-    for (const wf of activeWorkflows) {
-      if (wf.status === "running" || wf.status === "unknown") {
-        const selectedRoot = wf.progress?.selectedSeriesRoot;
-        if (selectedRoot) paths.add(selectedRoot);
-      }
-    }
-    return paths;
-  }, [activeWorkflows]);
-
-  // Filter series by search query
   const filteredRoots = useMemo(() => {
     if (!searchQuery.trim()) return seriesRoots;
     const query = searchQuery.toLowerCase();
@@ -81,6 +72,7 @@ export function WorkflowSidebar({
       setStartingWorkflows((prev) => new Set(prev).add(seriesRoot.path));
       try {
         await startThreadWorkflow(chatID, seriesRoot.path);
+        onWorkflowStarted?.(seriesRoot.name);
       } catch (err) {
         console.error("Failed to start workflow:", err);
       } finally {
@@ -91,7 +83,7 @@ export function WorkflowSidebar({
         });
       }
     },
-    [chatID, startingWorkflows],
+    [chatID, startingWorkflows, onWorkflowStarted],
   );
 
   if (!isOpen) return null;
@@ -147,9 +139,8 @@ export function WorkflowSidebar({
         ) : (
           <div className="space-y-1.5">
             {filteredRoots.map((root) => {
-              const isActive = activeSeriesPaths.has(root.path);
               const isStarting = startingWorkflows.has(root.path);
-              const isDisabled = isActive || isStarting || !chatID;
+              const isDisabled = isStarting || !chatID;
 
               return (
                 <button
@@ -166,15 +157,10 @@ export function WorkflowSidebar({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{root.name}</span>
-                    {isActive && (
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-accent/20 text-accent">
-                        Running
-                      </span>
-                    )}
                     {isStarting && (
                       <Loader2 className="w-3 h-3 shrink-0 text-foreground-muted animate-spin" />
                     )}
-                    {!isActive && !isStarting && (
+                    {!isStarting && (
                       <Play className="w-3 h-3 shrink-0 text-foreground-muted" />
                     )}
                   </div>
@@ -218,54 +204,58 @@ export function WorkflowSidebar({
   );
 }
 
+// ── Stage-specific label ─────────────────────────────────────────────
+
+function getStageLabel(stage: WorkflowStage): string {
+  switch (stage) {
+    case "copying":
+      return "Copying files";
+    case "fetching_metadata":
+      return "Fetching metadata";
+    case "processing_folders":
+      return "Processing folders";
+    case "structuring":
+      return "Structuring";
+    case "awaiting_finalize":
+      return "Ready for review";
+    case "finalizing":
+      return "Finalizing";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "canceled":
+      return "Canceled";
+    default:
+      return String(stage).replaceAll("_", " ");
+  }
+}
+
+// ── Workflow card ────────────────────────────────────────────────────
+
 function WorkflowCard({
   workflow,
   threadId,
   onCancel,
 }: {
-  workflow: {
-    workflowId: string;
-    status: string;
-    progress: {
-      totalFolders: number;
-      foldersCompleted: number;
-      foldersFailed: number;
-      workflowStage: string;
-      expectedCoreEpisodeCount: number;
-      resolvedCoreEpisodeCount: number;
-      canFinalize: boolean;
-      awaitingFinalApproval: boolean;
-    } | null;
-  };
+  workflow: ActiveWorkflow;
   threadId: string | null;
   onCancel: () => void;
 }) {
   const { progress, status } = workflow;
+  const p = progress as OrganizeLibraryProgress | null;
   const isRunning = status === "running" || status === "unknown";
   const isTerminal =
     status === "completed" || status === "failed" || status === "canceled";
+  const stage = p?.workflowStage ?? (status as WorkflowStage);
 
-  const percentage =
-    progress && progress.totalFolders > 0
-      ? Math.round(
-          ((progress.foldersCompleted + progress.foldersFailed) /
-            progress.totalFolders) *
-            100,
-        )
-      : 0;
-
-  const stageLabel = progress?.workflowStage
-    ? progress.workflowStage.replaceAll("_", " ")
-    : status;
+  const isAwaiting = stage === "awaiting_finalize";
 
   const StatusIcon = isTerminal
     ? status === "completed"
       ? CheckCircle2
-      : status === "failed"
-        ? XCircle
-        : XCircle
-    : progress?.workflowStage === "awaiting_review" ||
-        progress?.workflowStage === "awaiting_finalize"
+      : XCircle
+    : isAwaiting
       ? AlertTriangle
       : Loader2;
 
@@ -273,7 +263,9 @@ function WorkflowCard({
     ? status === "completed"
       ? "text-emerald-400"
       : "text-foreground-muted"
-    : "text-accent";
+    : isAwaiting
+      ? "text-amber-400"
+      : "text-accent";
 
   return (
     <div className="rounded-lg border border-border px-3 py-2 text-xs">
@@ -282,38 +274,17 @@ function WorkflowCard({
           className={clsx(
             "w-3 h-3 shrink-0",
             iconColor,
-            isRunning &&
-              progress?.workflowStage !== "awaiting_review" &&
-              progress?.workflowStage !== "awaiting_finalize" &&
-              "animate-spin",
+            isRunning && !isAwaiting && "animate-spin",
           )}
         />
-        <span className="text-foreground truncate capitalize">
-          {stageLabel}
+        <span className="text-foreground truncate">
+          {getStageLabel(stage)}
         </span>
       </div>
 
-      {progress && (
-        <>
-          <div className="flex items-center gap-2 text-foreground-muted mb-1.5">
-            <span className="tabular-nums">
-              {progress.foldersCompleted}/{progress.totalFolders} folders
-            </span>
-            <span className="tabular-nums">
-              {progress.resolvedCoreEpisodeCount}/
-              {progress.expectedCoreEpisodeCount} episodes
-            </span>
-          </div>
-          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5">
-            <div
-              className="h-full bg-accent rounded-full transition-all duration-500"
-              style={{ width: `${percentage}%` }}
-            />
-          </div>
-        </>
-      )}
+      {p && <WorkflowCardProgress progress={p} />}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 mt-1.5">
         {isRunning && (
           <button
             type="button"
@@ -323,18 +294,212 @@ function WorkflowCard({
             Cancel
           </button>
         )}
-        {progress?.canFinalize && progress?.awaitingFinalApproval && threadId && (
-          <button
-            type="button"
-            onClick={() =>
-              void finalizeThreadWorkflow(threadId, workflow.workflowId)
-            }
-            className="text-[10px] px-2 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10"
-          >
-            Finalize
-          </button>
+        {p?.canFinalize && p?.awaitingFinalApproval && threadId && (
+          <>
+            <button
+              type="button"
+              onClick={() =>
+                void finalizeThreadWorkflow(
+                  threadId,
+                  workflow.workflowId,
+                  false,
+                )
+              }
+              className="text-[10px] px-2 py-0.5 rounded border border-red-400/50 text-red-400 hover:bg-red-400/10 flex items-center gap-1"
+            >
+              <ThumbsDown className="w-2.5 h-2.5" />
+              Reject
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void finalizeThreadWorkflow(
+                  threadId,
+                  workflow.workflowId,
+                  true,
+                )
+              }
+              className="text-[10px] px-2 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10"
+            >
+              Approve
+            </button>
+          </>
         )}
       </div>
     </div>
   );
+}
+
+// ── Workflow card progress (stage-aware) ─────────────────────────────
+
+function WorkflowCardProgress({
+  progress,
+}: {
+  progress: OrganizeLibraryProgress;
+}) {
+  const stage = progress.workflowStage;
+
+  switch (stage) {
+    case "copying": {
+      const cp = progress.copyProgress;
+      if (!cp) {
+        return (
+          <>
+            <div className="text-foreground-muted mb-1.5">Copying files…</div>
+            <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5 relative">
+              <div className="absolute inset-0 h-full w-1/3 bg-accent rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+            </div>
+          </>
+        );
+      }
+      const pct =
+        cp.totalFiles > 0
+          ? Math.round((cp.filesCopied / cp.totalFiles) * 100)
+          : 0;
+      return (
+        <>
+          <div className="text-foreground-muted mb-1.5 tabular-nums">
+            {cp.filesCopied}/{cp.totalFiles} files
+            {cp.currentFiles.length > 0 &&
+              ` (${cp.currentFiles.length} active)`}
+          </div>
+          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </>
+      );
+    }
+
+    case "fetching_metadata": {
+      const meta = progress.metadataSummary;
+      return (
+        <>
+          <div className="text-foreground-muted mb-1.5">
+            {meta?.seriesName
+              ? `${meta.seriesName}`
+              : "Searching AniList…"}
+          </div>
+          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5 relative">
+            <div className="absolute inset-0 h-full w-1/3 bg-accent rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+          </div>
+        </>
+      );
+    }
+
+    case "processing_folders": {
+      const total = progress.totalFolders;
+      const done = progress.foldersCompleted + progress.foldersFailed;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      return (
+        <>
+          <div className="flex items-center gap-2 text-foreground-muted mb-1.5">
+            <span className="tabular-nums">
+              {done}/{total} folders
+            </span>
+            <span className="tabular-nums">
+              {progress.resolvedCoreEpisodeCount}/
+              {progress.expectedCoreEpisodeCount} ep
+            </span>
+          </div>
+          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </>
+      );
+    }
+
+    case "structuring": {
+      const sp = progress.structuringProgress;
+      if (!sp) {
+        return (
+          <>
+            <div className="text-foreground-muted mb-1.5">
+              Building Plex structure…
+            </div>
+            <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5 relative">
+              <div className="absolute inset-0 h-full w-1/3 bg-accent rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+            </div>
+          </>
+        );
+      }
+      const pct =
+        sp.totalFiles > 0
+          ? Math.round((sp.filesStructured / sp.totalFiles) * 100)
+          : 0;
+      return (
+        <>
+          <div className="text-foreground-muted mb-1.5 tabular-nums">
+            {sp.filesStructured}/{sp.totalFiles} files
+          </div>
+          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </>
+      );
+    }
+
+    case "awaiting_finalize":
+      return (
+        <div className="text-foreground-muted mb-1.5">
+          {progress.resolvedCoreEpisodeCount} episodes ready
+        </div>
+      );
+
+    case "finalizing": {
+      const op = progress.outputProgress;
+      if (!op) {
+        return (
+          <>
+            <div className="text-foreground-muted mb-1.5">
+              Moving to library…
+            </div>
+            <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5 relative">
+              <div className="absolute inset-0 h-full w-1/3 bg-accent rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+            </div>
+          </>
+        );
+      }
+      const pct =
+        op.totalFiles > 0
+          ? Math.round((op.filesCopied / op.totalFiles) * 100)
+          : 0;
+      return (
+        <>
+          <div className="text-foreground-muted mb-1.5 tabular-nums">
+            {op.filesCopied}/{op.totalFiles} files
+          </div>
+          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden mb-1.5">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </>
+      );
+    }
+
+    case "completed":
+      return (
+        <div className="text-emerald-400 mb-1.5">
+          {progress.resolvedCoreEpisodeCount} episodes organized
+        </div>
+      );
+
+    case "failed":
+      return (
+        <div className="text-red-400 mb-1.5">Workflow failed</div>
+      );
+
+    default:
+      return null;
+  }
 }

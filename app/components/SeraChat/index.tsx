@@ -26,6 +26,7 @@ interface SeraChatProps {
   chatID: string | null;
   initialMessages: Message[];
   initialWorkflowState?: PersistedWorkflowState[];
+  appendMessageRef?: React.MutableRefObject<((msg: Message) => void) | undefined>;
 }
 
 function CustomUserMessage({ message }: { message: any }) {
@@ -69,6 +70,7 @@ export function SeraChat({
   chatID,
   initialMessages,
   initialWorkflowState = [],
+  appendMessageRef,
 }: SeraChatProps) {
   const {
     messages = [],
@@ -92,6 +94,24 @@ export function SeraChat({
   const [pendingReviews, setPendingReviews] = useState<
     Array<{ workflowId: string; reviews: ReviewItem[] }>
   >([]);
+
+  // Expose an append-message callback to sibling components via ref
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  useEffect(() => {
+    if (appendMessageRef) {
+      appendMessageRef.current = (msg: Message) => {
+        setMessages([
+          ...messagesRef.current,
+          { ...msg, id: msg.id ?? crypto.randomUUID() } as any,
+        ]);
+      };
+    }
+    return () => {
+      if (appendMessageRef) appendMessageRef.current = undefined;
+    };
+  }, [appendMessageRef, setMessages]);
 
   const shouldAutoStartFromServer =
     chatID !== null &&
@@ -177,12 +197,20 @@ export function SeraChat({
       const lastMessage = messages[messages.length - 1];
       if (lastMessage?.role === "assistant" && lastMessage?.content && !hasSavedRef.current) {
         hasSavedRef.current = true;
-        const messagesToSave = messages.map((m: any) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          createdAt: m.createdAt,
-        }));
+        const SAVEABLE_ROLES = new Set(["user", "assistant", "system"]);
+        const messagesToSave = messages
+          .filter(
+            (m: any) =>
+              SAVEABLE_ROLES.has(m.role) &&
+              typeof m.content === "string" &&
+              m.content.length > 0,
+          )
+          .map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            createdAt: m.createdAt,
+          }));
 
         // Chat always exists by the time the AI responds
         if (chatID) {
