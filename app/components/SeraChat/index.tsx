@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useCopilotChatInternal } from "@copilotkit/react-core";
-import { useCopilotKit } from "@copilotkitnext/react";
 import { ThinkingMessage } from "../ThinkingMessage";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { ImageThumbnail } from "../ImageThumbnail";
@@ -76,21 +75,18 @@ export function SeraChat({
     messages = [],
     sendMessage,
     isLoading,
-    agent,
     stopGeneration,
     setMessages,
   } = useCopilotChatInternal({});
-  const { copilotkit } = useCopilotKit();
   const router = useRouter();
   const { createNewChat, updateExistingChat } = useChat();
   const { setCurrentThread, activeWorkflows, restoreWorkflows } = useWorkflows();
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
-  const autoStartedRef = useRef<Set<string>>(new Set());
   const hydratedRef = useRef(false);
+  const pendingChatCreationRef = useRef(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
-  const [agentReady, setAgentReady] = useState(false);
   const [pendingReviews, setPendingReviews] = useState<
     Array<{ workflowId: string; reviews: ReviewItem[] }>
   >([]);
@@ -112,22 +108,14 @@ export function SeraChat({
     };
   }, [appendMessageRef]);
 
-  const shouldAutoStartFromServer =
-    chatID !== null &&
-    initialMessages.length > 0 &&
-    initialMessages[initialMessages.length - 1].role === "user" &&
-    !initialMessages.some((m) => m.role === "assistant");
-
-  // Hydrate chat messages once per mounted chat container.
-  // For fresh chats with only one user message, we do not hydrate and instead
-  // send that message through CopilotKit once available.
+  // Hydrate CopilotKit with persisted messages once on mount.
   useEffect(() => {
     if (hydratedRef.current) return;
-    if (!shouldAutoStartFromServer) {
-      setMessages(initialMessages.length > 0 ? (initialMessages as any) : []);
+    if (initialMessages.length > 0) {
+      setMessages(initialMessages as any);
     }
     hydratedRef.current = true;
-  }, [initialMessages, setMessages, shouldAutoStartFromServer]);
+  }, [initialMessages, setMessages]);
 
   // Restore persisted workflow state when opening an existing chat.
   useEffect(() => {
@@ -140,55 +128,6 @@ export function SeraChat({
     setCurrentThread(chatID);
     return () => setCurrentThread(null);
   }, [chatID, setCurrentThread]);
-
-  // Explicitly connect the current agent to avoid first-run races where
-  // sendMessage is called before runtime connection is ready.
-  useEffect(() => {
-    let cancelled = false;
-    setAgentReady(false);
-    if (!agent) return;
-
-    copilotkit
-      .connectAgent({ agent })
-      .catch(() => {
-        // Some runtimes may not implement explicit connect; allow send flow.
-      })
-      .finally(() => {
-        if (!cancelled) setAgentReady(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agent, copilotkit]);
-
-  // For fresh server-created chats (single user message, no assistant yet),
-  // replay the user message once via sendMessage so CopilotKit handles follow-up.
-  useEffect(() => {
-    if (!shouldAutoStartFromServer) return;
-    if (!agent || !agentReady || isLoading) return;
-    if (autoStartedRef.current.has(chatID)) return;
-
-    const lastUser = initialMessages[initialMessages.length - 1];
-    autoStartedRef.current.add(chatID);
-    sendMessage({
-      id: crypto.randomUUID(),
-      role: "user",
-      content: lastUser.content,
-      createdAt: new Date(),
-    } as any).catch((err) => {
-      console.error("Failed to auto-start from server user message:", err);
-      autoStartedRef.current.delete(chatID);
-    });
-  }, [
-    chatID,
-    initialMessages,
-    agentReady,
-    isLoading,
-    agent,
-    sendMessage,
-    shouldAutoStartFromServer,
-  ]);
 
   // Save messages when generation completes
   useEffect(() => {
@@ -211,18 +150,36 @@ export function SeraChat({
             createdAt: m.createdAt,
           }));
 
-        // Chat always exists by the time the AI responds
         if (chatID) {
+          // Existing chat: update messages in the backend.
           updateExistingChat(chatID, messagesToSave).then(() => {
             setTimeout(() => {
               hasSavedRef.current = false;
             }, 1000);
           });
+        } else if (pendingChatCreationRef.current) {
+          // New chat from /new: the message was sent through CopilotKit directly.
+          // Create the chat now that we have the full conversation (user + assistant).
+          pendingChatCreationRef.current = false;
+          setIsCreatingChat(true);
+          createNewChat(messagesToSave)
+            .then((newChatID) => {
+              router.replace(`/chat/${newChatID}`);
+            })
+            .catch((err) => {
+              console.error("Failed to create chat after AI response:", err);
+            })
+            .finally(() => {
+              setIsCreatingChat(false);
+              setTimeout(() => {
+                hasSavedRef.current = false;
+              }, 1000);
+            });
         }
       }
     }
     wasLoadingRef.current = isLoading;
-  }, [isLoading, messages, updateExistingChat, chatID]);
+  }, [isLoading, messages, updateExistingChat, createNewChat, chatID, router]);
 
   // Fetch pending reviews from workflows that have them.
   useEffect(() => {
@@ -271,30 +228,19 @@ export function SeraChat({
   }, [messages, isLoading]);
 
   const handleSendMessage = useCallback(async (content: string) => {
-    if (chatID === null && messages.length === 0) {
-      // New chat from /new — create in backend first, then navigate.
-      setIsCreatingChat(true);
-      try {
-        const newChatID = await createNewChat([
-          { id: crypto.randomUUID(), role: "user", content },
-        ]);
-        router.push(`/chat/${newChatID}`);
-      } catch (err) {
-        console.error("Failed to create chat:", err);
-      } finally {
-        setIsCreatingChat(false);
-      }
-    } else {
-      // Existing chat: send through CopilotKit normally.
-      // Workflow triggering is handled by the AI agent via CopilotKit actions.
-      sendMessage({
-        id: crypto.randomUUID(),
-        role: "user",
-        content,
-        createdAt: new Date(),
-      } as any);
+    if (chatID === null) {
+      // New chat from /new — send through CopilotKit directly.
+      // The chat will be created in the backend once the AI responds
+      // (handled in the save effect via pendingChatCreationRef).
+      pendingChatCreationRef.current = true;
     }
-  }, [chatID, messages.length, sendMessage, createNewChat, router]);
+    sendMessage({
+      id: crypto.randomUUID(),
+      role: "user",
+      content,
+      createdAt: new Date(),
+    } as any);
+  }, [chatID, sendMessage]);
 
   // CopilotKit messages take priority; fall back to initialMessages before hydration.
   const messagesToRender = messages.length > 0 ? messages : initialMessages;
