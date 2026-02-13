@@ -95,23 +95,22 @@ export function SeraChat({
     Array<{ workflowId: string; reviews: ReviewItem[] }>
   >([]);
 
-  // Expose an append-message callback to sibling components via ref
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
+  // Announcements injected by sibling components (e.g. sidebar workflow start)
+  const [announcements, setAnnouncements] = useState<Message[]>([]);
 
   useEffect(() => {
     if (appendMessageRef) {
       appendMessageRef.current = (msg: Message) => {
-        setMessages([
-          ...messagesRef.current,
-          { ...msg, id: msg.id ?? crypto.randomUUID() } as any,
+        setAnnouncements((prev) => [
+          ...prev,
+          { ...msg, id: msg.id ?? crypto.randomUUID() },
         ]);
       };
     }
     return () => {
       if (appendMessageRef) appendMessageRef.current = undefined;
     };
-  }, [appendMessageRef, setMessages]);
+  }, [appendMessageRef]);
 
   const shouldAutoStartFromServer =
     chatID !== null &&
@@ -338,6 +337,15 @@ export function SeraChat({
 
             return null;
           })}
+
+          {/* Workflow announcements (e.g. "Let's organize X!") */}
+          {announcements.map((msg) => (
+            <CustomAssistantMessage
+              key={msg.id}
+              message={msg}
+              isLoading={false}
+            />
+          ))}
 
           {isLoading && messagesToRender.length > 0 && messagesToRender[messagesToRender.length - 1].role === "user" && (
             <CustomAssistantMessage
