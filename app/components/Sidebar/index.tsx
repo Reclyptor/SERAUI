@@ -78,6 +78,7 @@ function ChatItem({
 
 export function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [contentCollapsed, setContentCollapsed] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const { recentChats } = useChat();
@@ -96,18 +97,40 @@ export function Sidebar() {
     router.push(`/chat/${chatID}`);
   };
 
+  const handleToggle = (collapsed: boolean) => {
+    if (collapsed) {
+      // Collapse: start width transition, content stays expanded until it finishes
+      setIsCollapsed(true);
+    } else {
+      // Expand: switch content to expanded immediately, then grow width
+      setContentCollapsed(false);
+      setIsCollapsed(false);
+    }
+  };
+
+  const handleTransitionEnd = (e: React.TransitionEvent) => {
+    if (e.target !== e.currentTarget || e.propertyName !== "width") return;
+    if (isCollapsed) {
+      setContentCollapsed(true);
+    }
+  };
+
+  const sidebarStyle = {
+    width: isCollapsed ? 48 : 287,
+    transition: "width 300ms cubic-bezier(0.2, 0, 0, 1)",
+  };
+
   return (
     <>
       {/* Desktop sidebar - fixed at lg and above */}
       <aside
-        className={clsx(
-          "hidden lg:flex flex-col h-screen bg-background-secondary transition-[width] duration-200 ease-in-out",
-          isCollapsed ? "w-[48px]" : "w-[287px]"
-        )}
+        className="hidden lg:flex flex-col h-screen bg-background-secondary overflow-hidden shrink-0"
+        style={sidebarStyle}
+        onTransitionEnd={handleTransitionEnd}
       >
         <SidebarContent
-          isCollapsed={isCollapsed}
-          setIsCollapsed={setIsCollapsed}
+          isCollapsed={contentCollapsed}
+          setIsCollapsed={handleToggle}
           recentChats={sidebarChats}
           onNewChat={handleNewChat}
           onSelectChat={handleSelectChat}
@@ -117,14 +140,13 @@ export function Sidebar() {
 
       {/* Mobile sidebar - sticky below lg */}
       <aside
-        className={clsx(
-          "lg:hidden fixed left-0 top-0 z-40 flex flex-col h-screen bg-background-secondary transition-[width] duration-200 ease-in-out",
-          isCollapsed ? "w-[48px]" : "w-[287px]"
-        )}
+        className="lg:hidden fixed left-0 top-0 z-40 flex flex-col h-screen bg-background-secondary overflow-hidden"
+        style={sidebarStyle}
+        onTransitionEnd={handleTransitionEnd}
       >
         <SidebarContent
-          isCollapsed={isCollapsed}
-          setIsCollapsed={setIsCollapsed}
+          isCollapsed={contentCollapsed}
+          setIsCollapsed={handleToggle}
           recentChats={sidebarChats}
           onNewChat={handleNewChat}
           onSelectChat={handleSelectChat}
