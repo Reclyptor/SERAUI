@@ -14,22 +14,14 @@ import {
   updateChat,
   type ChatListItem,
   type Message,
-  type WorkflowStateEntry,
 } from "@/app/actions/chat";
 
 interface ChatContextValue {
   recentChats: ChatListItem[];
   isLoading: boolean;
   error: string | null;
-  createNewChat: (
-    messages: Message[],
-    workflowState?: WorkflowStateEntry[],
-  ) => Promise<string>;
-  updateExistingChat: (
-    chatID: string,
-    messages: Message[],
-    workflowState?: WorkflowStateEntry[],
-  ) => Promise<void>;
+  createNewChat: (messages: Message[]) => Promise<string>;
+  updateExistingChat: (chatID: string, messages: Message[]) => Promise<void>;
   refreshChats: () => Promise<void>;
 }
 
@@ -57,12 +49,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [refreshChats]);
 
   const createNewChat = useCallback(
-    async (
-      messages: Message[],
-      workflowState?: WorkflowStateEntry[],
-    ): Promise<string> => {
+    async (messages: Message[]): Promise<string> => {
       try {
-        const newChatData = await createChat(messages, workflowState);
+        const newChatData = await createChat(messages);
         await refreshChats();
         setError(null);
         return newChatData._id;
@@ -76,13 +65,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const updateExistingChat = useCallback(
-    async (
-      chatID: string,
-      messages: Message[],
-      workflowState?: WorkflowStateEntry[],
-    ): Promise<void> => {
+    async (chatID: string, messages: Message[]): Promise<void> => {
       try {
-        await updateChat(chatID, messages, workflowState);
+        await updateChat(chatID, messages);
         await refreshChats();
         setError(null);
       } catch (err) {

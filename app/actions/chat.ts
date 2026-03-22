@@ -13,21 +13,11 @@ export interface Message {
   createdAt?: Date;
 }
 
-export interface WorkflowStateEntry {
-  workflowId: string;
-  status: "running" | "completed" | "failed" | "unknown" | "canceled";
-  progress: Record<string, unknown> | null;
-  pendingReviewWorkflows: string[];
-  startedAt: string;
-  lastSyncedAt: string;
-}
-
 export interface Chat {
   _id: string;
   userID: string;
   title: string;
   messages: Message[];
-  workflowState?: WorkflowStateEntry[];
   createdAt: string;
   updatedAt: string;
 }
@@ -83,10 +73,7 @@ export async function getChat(chatID: string): Promise<Chat> {
   return response.json();
 }
 
-export async function createChat(
-  messages: Message[],
-  workflowState?: WorkflowStateEntry[],
-): Promise<Chat> {
+export async function createChat(messages: Message[]): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
   const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats`, {
@@ -95,7 +82,7 @@ export async function createChat(
       Cookie: cookieHeader,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ messages, workflowState }),
+    body: JSON.stringify({ messages }),
   });
 
   if (!response.ok) {
@@ -108,7 +95,6 @@ export async function createChat(
 export async function updateChat(
   chatID: string,
   messages: Message[],
-  workflowState?: WorkflowStateEntry[],
 ): Promise<Chat> {
   const cookieHeader = await getCookieHeader();
 
@@ -118,38 +104,11 @@ export async function updateChat(
       Cookie: cookieHeader,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ messages, workflowState }),
+    body: JSON.stringify({ messages }),
   });
 
   if (!response.ok) {
     throw new Error(`Failed to update chat: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-export async function updateChatWorkflowState(
-  chatID: string,
-  workflowState: WorkflowStateEntry[],
-): Promise<Chat | null> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}/workflow-state`, {
-    method: "PATCH",
-    headers: {
-      Cookie: cookieHeader,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ workflowState }),
-  });
-
-  if (!response.ok) {
-    const details = await response.text().catch(() => "");
-    console.error(
-      `Failed to update workflow state (${response.status} ${response.statusText})`,
-      details,
-    );
-    return null;
   }
 
   return response.json();

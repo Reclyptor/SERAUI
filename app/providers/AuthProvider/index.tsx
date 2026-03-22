@@ -30,29 +30,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [status, isRefreshError]);
 
-  // Only show loading on initial page load (no session data yet)
-  if (status === "loading" && !session) {
-    return (
-      <ImageCacheProvider>
-        <div className="flex items-center justify-center h-screen bg-background">
-          <div className="text-foreground-muted">Loading...</div>
-        </div>
-      </ImageCacheProvider>
-    );
-  }
-
-  // Not authenticated or refresh failed - redirect will happen, show auth state
+  // Render nothing while redirecting to login (client-side session expiry)
   if (status === "unauthenticated" || isRefreshError) {
-    return (
-      <ImageCacheProvider>
-        <div className="flex items-center justify-center h-screen bg-background">
-          <div className="text-foreground-muted">Authenticating...</div>
-        </div>
-      </ImageCacheProvider>
-    );
+    return null;
   }
 
-  // Authenticated - all API auth is done via session cookies
   return (
     <ImageCacheProvider>
       {children}

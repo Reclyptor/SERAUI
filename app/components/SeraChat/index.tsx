@@ -7,24 +7,13 @@ import { ThinkingMessage } from "../ThinkingMessage";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { WelcomeView } from "../WelcomeView";
-import { WorkflowBanner } from "../WorkflowBanner";
-import { ReviewCardList } from "../ReviewCard";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import { useChat } from "../../contexts/ChatContext";
-import {
-  useWorkflows,
-  type PersistedWorkflowState,
-} from "../../contexts/WorkflowContext";
-import {
-  getPendingReviews,
-  type ReviewItem,
-} from "@/app/actions/media";
 import type { Message } from "@/app/actions/chat";
 
 interface SeraChatProps {
   chatID: string | null;
   initialMessages: Message[];
-  initialWorkflowState?: PersistedWorkflowState[];
   appendMessageRef?: React.MutableRefObject<((msg: Message) => void) | undefined>;
 }
 
@@ -68,7 +57,6 @@ function CustomAssistantMessage({ message, isLoading }: { message: any, isLoadin
 export function SeraChat({
   chatID,
   initialMessages,
-  initialWorkflowState = [],
   appendMessageRef,
 }: SeraChatProps) {
   const {
@@ -80,18 +68,14 @@ export function SeraChat({
   } = useCopilotChatInternal({});
   const router = useRouter();
   const { createNewChat, updateExistingChat } = useChat();
-  const { setCurrentThread, activeWorkflows, restoreWorkflows } = useWorkflows();
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasLoadingRef = useRef(false);
   const hasSavedRef = useRef(false);
   const hydratedRef = useRef(false);
   const pendingChatCreationRef = useRef(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
-  const [pendingReviews, setPendingReviews] = useState<
-    Array<{ workflowId: string; reviews: ReviewItem[] }>
-  >([]);
 
-  // Announcements injected by sibling components (e.g. sidebar workflow start)
+  // Announcements injected by sibling components
   const [announcements, setAnnouncements] = useState<Message[]>([]);
 
   useEffect(() => {
@@ -116,18 +100,6 @@ export function SeraChat({
     }
     hydratedRef.current = true;
   }, [initialMessages, setMessages]);
-
-  // Restore persisted workflow state when opening an existing chat.
-  useEffect(() => {
-    if (!chatID || initialWorkflowState.length === 0) return;
-    restoreWorkflows(initialWorkflowState);
-  }, [chatID, initialWorkflowState, restoreWorkflows]);
-
-  // Subscribe workflow updates to the current chat thread.
-  useEffect(() => {
-    setCurrentThread(chatID);
-    return () => setCurrentThread(null);
-  }, [chatID, setCurrentThread]);
 
   // Save messages when generation completes
   useEffect(() => {
@@ -180,45 +152,6 @@ export function SeraChat({
     }
     wasLoadingRef.current = isLoading;
   }, [isLoading, messages, updateExistingChat, createNewChat, chatID, router]);
-
-  // Fetch pending reviews from workflows that have them.
-  useEffect(() => {
-    const workflowsWithReviews = activeWorkflows.filter(
-      (w) =>
-        w.status !== "canceled" &&
-        (w.status === "running" || w.status === "unknown") &&
-        w.pendingReviewWorkflows.length > 0,
-    );
-
-    if (workflowsWithReviews.length === 0) {
-      setPendingReviews((prev) => (prev.length === 0 ? prev : []));
-      return;
-    }
-
-    const fetchReviews = async () => {
-      const allReviews: Array<{ workflowId: string; reviews: ReviewItem[] }> = [];
-      for (const workflow of workflowsWithReviews) {
-        for (const folderWfId of workflow.pendingReviewWorkflows) {
-          try {
-            const reviews = await getPendingReviews(folderWfId);
-            if (reviews.length > 0) {
-              allReviews.push({ workflowId: folderWfId, reviews });
-            }
-          } catch {
-            // Folder workflow may have completed or not be queryable
-          }
-        }
-      }
-
-      setPendingReviews((prev) => {
-        const prevSerialized = JSON.stringify(prev);
-        const nextSerialized = JSON.stringify(allReviews);
-        return prevSerialized === nextSerialized ? prev : allReviews;
-      });
-    };
-
-    fetchReviews();
-  }, [activeWorkflows]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -284,7 +217,7 @@ export function SeraChat({
             return null;
           })}
 
-          {/* Workflow announcements (e.g. "Let's organize X!") */}
+          {/* Announcements injected by sibling components */}
           {announcements.map((msg) => (
             <CustomAssistantMessage
               key={msg.id}
@@ -303,24 +236,8 @@ export function SeraChat({
               isLoading={true}
             />
           )}
-
-          {/* HITL Review Cards */}
-          {pendingReviews.length > 0 && (
-            <div className="py-4 max-w-[672px] mx-auto w-full">
-              {pendingReviews.map(({ workflowId, reviews }) => (
-                <ReviewCardList
-                  key={workflowId}
-                  reviews={reviews}
-                  folderWorkflowId={workflowId}
-                />
-              ))}
-            </div>
-          )}
         </div>
       </div>
-
-      {/* Workflow Progress Banner */}
-      <WorkflowBanner />
 
       <div className="w-full max-w-[672px] mx-auto">
         <ImageUploadInput
