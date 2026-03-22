@@ -20,6 +20,10 @@
 # production
 /build
 
+# IDEs
+.vscode
+.zed
+
 # misc
 .DS_Store
 *.pem
