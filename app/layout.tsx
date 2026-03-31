@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "./providers/AuthProvider";
 import { SessionProvider } from "./providers/SessionProvider";
 import { ChatProvider } from "./contexts/ChatContext";
-import "@copilotkit/react-ui/styles.css";
 import "./globals.css";
 
 // Force dynamic rendering so env vars are read at runtime, not build time

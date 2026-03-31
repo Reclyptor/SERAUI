@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef } from "react";
-import { CopilotKit } from "@copilotkit/react-core";
 import { SeraChat } from "../SeraChat";
 import type { Message } from "@/app/actions/chat";
 
@@ -17,16 +16,14 @@ export function ChatContainer({
   const appendMessageRef = useRef<(msg: Message) => void>(undefined);
 
   return (
-    <CopilotKit runtimeUrl="/api/v1/copilotkit" agent="SERA">
-      <div className="flex h-full w-full">
-        <div className="flex-1 min-w-0">
-          <SeraChat
-            chatID={chatID}
-            initialMessages={initialMessages}
-            appendMessageRef={appendMessageRef}
-          />
-        </div>
+    <div className="flex h-full w-full">
+      <div className="flex-1 min-w-0">
+        <SeraChat
+          chatID={chatID}
+          initialMessages={initialMessages}
+          appendMessageRef={appendMessageRef}
+        />
       </div>
-    </CopilotKit>
+    </div>
   );
 }

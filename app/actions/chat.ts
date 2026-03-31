@@ -132,7 +132,7 @@ export async function deleteChat(chatID: string): Promise<void> {
 export async function uploadImage(formData: FormData): Promise<{ imageID: string }> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/copilotkit/upload-image`, {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/agent/upload-image`, {
     method: "POST",
     headers: {
       Cookie: cookieHeader,
