@@ -8,20 +8,12 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import {
-  getChats,
-  createChat,
-  updateChat,
-  type ChatListItem,
-  type Message,
-} from "@/app/actions/chat";
+import { getChats, type ChatListItem } from "@/app/actions/chat";
 
 interface ChatContextValue {
   recentChats: ChatListItem[];
   isLoading: boolean;
   error: string | null;
-  createNewChat: (messages: Message[]) => Promise<string>;
-  updateExistingChat: (chatID: string, messages: Message[]) => Promise<void>;
   refreshChats: () => Promise<void>;
 }
 
@@ -48,44 +40,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     refreshChats().finally(() => setIsLoading(false));
   }, [refreshChats]);
 
-  const createNewChat = useCallback(
-    async (messages: Message[]): Promise<string> => {
-      try {
-        const newChatData = await createChat(messages);
-        await refreshChats();
-        setError(null);
-        return newChatData._id;
-      } catch (err) {
-        console.error("Failed to create chat:", err);
-        setError("Failed to save chat");
-        throw err;
-      }
-    },
-    [refreshChats],
-  );
-
-  const updateExistingChat = useCallback(
-    async (chatID: string, messages: Message[]): Promise<void> => {
-      try {
-        await updateChat(chatID, messages);
-        await refreshChats();
-        setError(null);
-      } catch (err) {
-        console.error("Failed to update chat:", err);
-        setError("Failed to save chat");
-      }
-    },
-    [refreshChats],
-  );
-
   return (
     <ChatContext.Provider
       value={{
         recentChats,
         isLoading,
         error,
-        createNewChat,
-        updateExistingChat,
         refreshChats,
       }}
     >

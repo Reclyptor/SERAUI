@@ -15,12 +15,14 @@ interface AgentEvent {
 
 interface UseAgentChatOptions {
   initialMessages?: Message[];
+  chatId?: string | null;
   threadId?: string;
 }
 
 interface UseAgentChatReturn {
   messages: Message[];
   isLoading: boolean;
+  chatId: string | null;
   threadId: string | null;
   runId: string | null;
   sendMessage: (content: string) => Promise<void>;
@@ -31,6 +33,7 @@ interface UseAgentChatReturn {
 export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatReturn {
   const [messages, setMessages] = useState<Message[]>(options.initialMessages ?? []);
   const [isLoading, setIsLoading] = useState(false);
+  const [chatId, setChatId] = useState<string | null>(options.chatId ?? null);
   const [threadId, setThreadId] = useState<string | null>(options.threadId ?? null);
   const [runId, setRunId] = useState<string | null>(null);
 
@@ -89,11 +92,6 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     setMessages(currentMessages);
     setIsLoading(true);
 
-    // Send only content (not thinking) as conversation history
-    const conversationHistory = messages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role, content: m.content }));
-
     try {
       const abortController = new AbortController();
       abortRef.current = abortController;
@@ -103,8 +101,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: content,
+          chatId: chatId ?? undefined,
           threadId: threadId ?? undefined,
-          conversationHistory,
         }),
         signal: abortController.signal,
       });
@@ -113,7 +111,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         throw new Error(`Chat request failed: ${response.statusText}`);
       }
 
-      const { runId: newRunId, threadId: newThreadId } = await response.json();
+      const { runId: newRunId, threadId: newThreadId, chatId: newChatId } = await response.json();
+      setChatId(newChatId);
       setRunId(newRunId);
       setThreadId(newThreadId);
 
@@ -157,7 +156,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       cleanup();
       setIsLoading(false);
     }
-  }, [messages, isLoading, threadId, cleanup]);
+  }, [messages, isLoading, chatId, threadId, cleanup]);
 
   const handleEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -245,6 +244,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   return {
     messages,
     isLoading,
+    chatId,
     threadId,
     runId,
     sendMessage,

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useAgentChat } from "../../hooks/useAgentChat";
-import { useChatPersistence } from "../../hooks/useChatPersistence";
+import { useChat } from "../../contexts/ChatContext";
 import { ChatMessage } from "../ChatMessage";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { WelcomeView } from "../WelcomeView";
@@ -21,18 +22,30 @@ export function SeraChat({
   initialMessages,
   appendMessageRef,
 }: SeraChatProps) {
-  const { messages, sendMessage, isLoading, stopGeneration } = useAgentChat({
-    initialMessages,
-  });
-
-  const { isCreatingChat, markPendingCreation } = useChatPersistence({
-    chatID,
-    messages,
-    isLoading,
-  });
+  const router = useRouter();
+  const { refreshChats } = useChat();
+  const { messages, sendMessage, isLoading, chatId, stopGeneration } =
+    useAgentChat({
+      initialMessages,
+      chatId: chatID,
+    });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [announcements, setAnnouncements] = useState<Message[]>([]);
+  const hasNavigatedRef = useRef(false);
+
+  // Navigate to new chat URL + refresh sidebar after streaming completes
+  const prevLoadingRef = useRef(false);
+  useEffect(() => {
+    if (prevLoadingRef.current && !isLoading) {
+      if (!chatID && chatId && !hasNavigatedRef.current) {
+        hasNavigatedRef.current = true;
+        router.replace(`/chat/${chatId}`);
+      }
+      refreshChats();
+    }
+    prevLoadingRef.current = isLoading;
+  }, [isLoading, chatID, chatId, router, refreshChats]);
 
   // Expose append for sibling components
   useEffect(() => {
@@ -56,23 +69,11 @@ export function SeraChat({
     }
   }, [messages, isLoading]);
 
-  const handleSendMessage = useCallback(
-    async (content: string) => {
-      if (chatID === null) {
-        markPendingCreation();
-      }
-      await sendMessage(content);
-    },
-    [chatID, sendMessage, markPendingCreation]
-  );
-
-  const isBusy = isLoading || isCreatingChat;
-
   // Welcome view on /new with no messages
   if (chatID === null && messages.length === 0) {
     return (
       <div className="flex h-full w-full flex-col bg-background">
-        <WelcomeView onSend={handleSendMessage} isLoading={isBusy} />
+        <WelcomeView onSend={sendMessage} isLoading={isLoading} />
       </div>
     );
   }
@@ -82,7 +83,9 @@ export function SeraChat({
     messages.length > 0 &&
     messages[messages.length - 1].role === "user";
 
-  const lastAssistantIndex = messages.findLastIndex((m) => m.role === "assistant");
+  const lastAssistantIndex = messages.findLastIndex(
+    (m) => m.role === "assistant"
+  );
 
   return (
     <div className="flex h-full w-full flex-col bg-background relative">
@@ -116,8 +119,8 @@ export function SeraChat({
 
       <div className="w-full max-w-[672px] mx-auto">
         <ImageUploadInput
-          inProgress={isBusy}
-          onSend={handleSendMessage}
+          inProgress={isLoading}
+          onSend={sendMessage}
           onStop={stopGeneration}
         />
       </div>
