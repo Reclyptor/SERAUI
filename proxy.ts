@@ -1,25 +1,29 @@
 import { auth } from "@/lib/auth";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const SERA_API_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
 
-export async function proxy(request: NextRequest) {
-  const { pathname, search } = request.nextUrl;
+// Use auth() as a wrapper — NOT a bare function call.
+// The wrapper pattern ensures NextAuth writes the updated session cookie
+// onto the response when the JWT callback refreshes tokens. Without this,
+// a refreshed token stays in server memory but the browser keeps the old
+// cookie, causing `invalid_grant` on the next request.
+export const proxy = auth((req) => {
+  const { pathname, search } = req.nextUrl;
 
-  // Rewrite agent API calls to the backend
   if (pathname.startsWith("/api/v1/agent")) {
-    const target = pathname.replace(/^\/api\/v1\/agent/, "/api/v1/agent");
-    return NextResponse.rewrite(new URL(`${SERA_API_URL}${target}${search}`));
+    if (!req.auth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.rewrite(new URL(`${SERA_API_URL}${pathname}${search}`));
   }
 
-  // Redirect unauthenticated users to login before any HTML is sent
-  const session = await auth();
-  if (!session) {
-    return NextResponse.redirect(new URL("/api/auth/signin", request.url));
+  if (!req.auth) {
+    return NextResponse.redirect(new URL("/api/auth/signin", req.url));
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: [

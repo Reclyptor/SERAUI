@@ -1,46 +1,70 @@
 import NextAuth from "next-auth";
 
-// Cache the last successful refresh result for 30 seconds.
-// This prevents concurrent requests (e.g. page reload triggering multiple
-// proxy auth() calls) from each trying to refresh the token independently.
-// Authentik rotates refresh tokens, so only the first concurrent refresh
-// succeeds — the rest would fail with a stale refresh token. By caching
-// the result, subsequent calls within 30s reuse the already-refreshed token.
-let cachedRefresh: {
+// --- OIDC discovery cache ---
+// The discovery document rarely changes. Cache for 1 hour to avoid a
+// round-trip to Authentik on every token refresh.
+let discoveryCache: { tokenEndpoint: string; expiresAt: number } | null = null;
+
+async function getTokenEndpoint(): Promise<string> {
+  if (discoveryCache && Date.now() < discoveryCache.expiresAt) {
+    return discoveryCache.tokenEndpoint;
+  }
+  const res = await fetch(
+    `${process.env.AUTHENTIK_ISSUER}/.well-known/openid-configuration`
+  );
+  const data = await res.json();
+  discoveryCache = {
+    tokenEndpoint: data.token_endpoint,
+    expiresAt: Date.now() + 3_600_000,
+  };
+  return data.token_endpoint;
+}
+
+// --- Token refresh cache ---
+// Authentik rotates refresh tokens on every use. If two requests arrive
+// with the same cookie, the first refresh succeeds and rotates the token;
+// the second tries the now-invalid old token and gets `invalid_grant`.
+//
+// To prevent this: cache the refresh result until the NEW access token
+// enters the refresh window (expiresAt - 120s). Any request within that
+// window reuses the cached tokens — no redundant Authentik calls, no
+// rotation race.
+interface RefreshResult {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
-  time: number;
-} | null = null;
+}
 
-// Dedup truly concurrent refresh calls sharing a single in-flight promise.
-let inflightRefresh: Promise<any> | null = null;
+let cachedRefresh: RefreshResult | null = null;
+let inflightRefresh: Promise<RefreshResult> | null = null;
+
+function getValidCache(): typeof cachedRefresh {
+  if (!cachedRefresh) return null;
+  if (Date.now() / 1000 >= cachedRefresh.expiresAt - 120) return null;
+  return cachedRefresh;
+}
 
 async function refreshAccessToken(token: any) {
-  // Reuse cached result if we refreshed within the last 30 seconds
-  if (cachedRefresh && Date.now() - cachedRefresh.time < 30_000) {
-    console.log("[Auth] Using cached refresh result");
-    return {
-      ...token,
-      accessToken: cachedRefresh.accessToken,
-      refreshToken: cachedRefresh.refreshToken,
-      expiresAt: cachedRefresh.expiresAt,
-    };
+  const cached = getValidCache();
+  if (cached) {
+    return { ...token, ...cached };
   }
 
-  // If a refresh is already in flight, wait for it instead of starting another
   if (inflightRefresh) {
-    console.log("[Auth] Waiting for in-flight refresh");
-    const result = await inflightRefresh;
-    return { ...token, ...result };
+    try {
+      const result = await inflightRefresh;
+      return { ...token, ...result };
+    } catch {
+      const fallback = getValidCache();
+      if (fallback) return { ...token, ...fallback };
+      throw new Error("Token refresh failed");
+    }
   }
 
-  // Perform the actual refresh
   const doRefresh = async () => {
-    const discoveryUrl = `${process.env.AUTHENTIK_ISSUER}/.well-known/openid-configuration`;
-    const discovery = await fetch(discoveryUrl).then((r) => r.json());
+    const tokenEndpoint = await getTokenEndpoint();
 
-    const response = await fetch(discovery.token_endpoint, {
+    const response = await fetch(tokenEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -58,25 +82,29 @@ async function refreshAccessToken(token: any) {
     }
 
     console.log("[Auth] Token refreshed successfully");
-    const result = {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token ?? token.refreshToken,
-      expiresAt: Math.floor(Date.now() / 1000) + data.expires_in,
+    return {
+      accessToken: data.access_token as string,
+      refreshToken: (data.refresh_token ?? token.refreshToken) as string,
+      expiresAt: Math.floor(Date.now() / 1000) + (data.expires_in as number),
     };
-
-    // Cache for 30s to protect against subsequent concurrent requests
-    cachedRefresh = { ...result, time: Date.now() };
-    return result;
   };
 
   inflightRefresh = doRefresh();
   try {
     const result = await inflightRefresh;
+    cachedRefresh = result;
     return { ...token, ...result };
+  } catch (error) {
+    // Another request path may have refreshed and cached while we failed
+    const fallback = getValidCache();
+    if (fallback) return { ...token, ...fallback };
+    throw error;
   } finally {
     inflightRefresh = null;
   }
 }
+
+// --- NextAuth configuration ---
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -96,8 +124,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, account }) {
-      // Initial sign in - store tokens
       if (account) {
+        cachedRefresh = null;
         return {
           ...token,
           accessToken: account.access_token,
@@ -106,30 +134,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         };
       }
 
-      // Return token if not expired (with 120s buffer)
       const expiresAt = token.expiresAt as number | undefined;
-      if (expiresAt && Date.now() < expiresAt * 1000 - 120000) {
+      if (expiresAt && Date.now() < expiresAt * 1000 - 120_000) {
         return token;
       }
 
-      // Token expired or expiring soon - refresh it
       console.log("[Auth] Token expired or expiring, refreshing...");
       try {
         return await refreshAccessToken(token);
       } catch {
-        // Refresh failed - clear tokens so user gets redirected to login
         console.error("[Auth] Refresh failed, clearing session");
         return { ...token, accessToken: undefined, refreshToken: undefined };
       }
     },
     async session({ session, token }) {
-      // Don't expose tokens to client - they stay in the encrypted cookie
-      // Backend extracts them by decrypting the cookie with shared AUTH_SECRET
-      // Only expose error state so frontend can handle re-auth
       if (!token.accessToken) {
         session.error = "RefreshError";
       }
-      // Expose token expiry so the client can show a countdown timer
       if (token.expiresAt) {
         session.expiresAt = token.expiresAt as number;
       }
