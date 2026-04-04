@@ -72,7 +72,13 @@ function AssistantMessage({
 }) {
   return (
     <div className="py-4 max-w-[672px] mx-auto w-full">
-      <ThinkingMessage content={message.content || ""} isLoading={isLoading} isLatest={isLatest} />
+      <ThinkingMessage
+        content={message.content || ""}
+        thinking={message.thinking}
+        thinkingDuration={message.thinkingDuration}
+        isLoading={isLoading}
+        isLatest={isLatest}
+      />
     </div>
   );
 }

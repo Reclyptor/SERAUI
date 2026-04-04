@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Markdown } from "../Markdown";
 import { ChevronIcon } from "../Icons";
 
@@ -68,43 +68,24 @@ function BlinkingCaret() {
 
 interface ThinkingMessageProps {
   content: string;
+  thinking?: string;
+  thinkingDuration?: number;
   isLoading?: boolean;
   isLatest?: boolean;
 }
 
-export function ThinkingMessage({ content, isLoading, isLatest }: ThinkingMessageProps) {
+export function ThinkingMessage({
+  content,
+  thinking,
+  thinkingDuration,
+  isLoading,
+  isLatest,
+}: ThinkingMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const thinkingTextRef = useRef<HTMLSpanElement>(null);
   const responseTextRef = useRef<HTMLSpanElement>(null);
 
-  const { thinking, response, isThinkingComplete, embeddedDuration } = useMemo(() => {
-    const tagMatch = content.match(/\[THINKING(?::(\d+))?\]\n/);
-    const thinkingEnd = content.indexOf("\n[/THINKING]");
-
-    let thinking: string | null = null;
-    let response = content;
-    const isThinkingComplete = thinkingEnd !== -1;
-    let embeddedDuration: number | null = null;
-
-    if (tagMatch) {
-      const tagLength = tagMatch[0].length;
-      const tagStart = tagMatch.index!;
-
-      if (tagMatch[1] != null) {
-        embeddedDuration = parseInt(tagMatch[1], 10);
-      }
-
-      if (isThinkingComplete) {
-        thinking = content.substring(tagStart + tagLength, thinkingEnd);
-        response = content.substring(thinkingEnd + 13);
-      } else {
-        thinking = content.substring(tagStart + tagLength);
-        response = "";
-      }
-    }
-
-    return { thinking, response, isThinkingComplete, embeddedDuration };
-  }, [content]);
+  const isThinkingComplete = thinkingDuration != null;
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     if (!isThinkingComplete) return false;
@@ -128,7 +109,7 @@ export function ThinkingMessage({ content, isLoading, isLatest }: ThinkingMessag
   }, [isThinkingComplete, isLatest]);
 
   useCharStream(thinking ?? "", isThinkingComplete, thinkingTextRef, scrollRef);
-  useCharStream(response, responseComplete, responseTextRef);
+  useCharStream(content, responseComplete, responseTextRef);
 
   if (!thinking) {
     if (!content && isLoading) {
@@ -155,7 +136,7 @@ export function ThinkingMessage({ content, isLoading, isLatest }: ThinkingMessag
   }
 
   const label = isThinkingComplete
-    ? `Thought for ${embeddedDuration ?? 0}s`
+    ? `Thought for ${thinkingDuration}s`
     : "Thinking...";
 
   const isStreaming = !isThinkingComplete;
@@ -200,7 +181,7 @@ export function ThinkingMessage({ content, isLoading, isLatest }: ThinkingMessag
       </div>
 
       {responseComplete ? (
-        response ? <Markdown content={response} /> : null
+        content ? <Markdown content={content} /> : null
       ) : isResponseStreaming ? (
         <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap break-words">
           <span ref={responseTextRef} />

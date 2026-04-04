@@ -5,13 +5,6 @@ import type { Message } from "@/app/actions/chat";
 
 const API_BASE = "/api/v1/agent";
 
-function buildMessageContent(thinking: string, thinkingDone: boolean, text: string, durationSec?: number): string {
-  if (!thinking) return text;
-  const tag = durationSec != null ? `[THINKING:${durationSec}]` : "[THINKING]";
-  if (thinkingDone) return `${tag}\n${thinking}\n[/THINKING]\n${text}`;
-  return `${tag}\n${thinking}`;
-}
-
 interface AgentEvent {
   type: string;
   runId: string;
@@ -75,10 +68,16 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     setIsLoading(false);
   }, [runId, cleanup]);
 
+  const updateAssistantMessage = useCallback((patch: Partial<Message>) => {
+    const id = assistantIdRef.current;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+    );
+  }, []);
+
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) return;
 
-    // Add user message immediately
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -90,13 +89,12 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     setMessages(currentMessages);
     setIsLoading(true);
 
-    // Build conversation history WITHOUT the new message — the backend appends it
+    // Send only content (not thinking) as conversation history
     const conversationHistory = messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
 
     try {
-      // 1. Start the run
       const abortController = new AbortController();
       abortRef.current = abortController;
 
@@ -119,7 +117,6 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       setRunId(newRunId);
       setThreadId(newThreadId);
 
-      // 2. Prepare assistant message
       assistantIdRef.current = crypto.randomUUID();
       assistantContentRef.current = "";
       thinkingContentRef.current = "";
@@ -136,7 +133,6 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // 3. Subscribe to SSE stream
       const es = new EventSource(`${API_BASE}/stream/${newRunId}`);
       eventSourceRef.current = es;
 
@@ -155,7 +151,6 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       };
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        // User cancelled — already handled
         return;
       }
       console.error("[useAgentChat] Error:", error);
@@ -172,11 +167,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         }
         const { content } = event.data as { content: string };
         thinkingContentRef.current += content;
-        const id = assistantIdRef.current;
-        const fullContent = buildMessageContent(thinkingContentRef.current, false, assistantContentRef.current);
-        setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
-        );
+        updateAssistantMessage({ thinking: thinkingContentRef.current });
         break;
       }
 
@@ -189,22 +180,17 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         if (thinkingStartTimeRef.current !== null) {
           thinkingDurationRef.current = Math.round((Date.now() - thinkingStartTimeRef.current) / 1000);
         }
-        const id = assistantIdRef.current;
-        const fullContent = buildMessageContent(thinkingContentRef.current, true, assistantContentRef.current, thinkingDurationRef.current);
-        setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
-        );
+        updateAssistantMessage({
+          thinking: thinkingContentRef.current,
+          thinkingDuration: thinkingDurationRef.current,
+        });
         break;
       }
 
       case "text.delta": {
         const { content } = event.data as { content: string };
         assistantContentRef.current += content;
-        const id = assistantIdRef.current;
-        const fullContent = buildMessageContent(thinkingContentRef.current, thinkingDoneRef.current, assistantContentRef.current, thinkingDurationRef.current);
-        setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
-        );
+        updateAssistantMessage({ content: assistantContentRef.current });
         break;
       }
 
@@ -213,22 +199,14 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         if (content) {
           assistantContentRef.current = content;
         }
-        const id = assistantIdRef.current;
-        const fullContent = buildMessageContent(thinkingContentRef.current, thinkingDoneRef.current, assistantContentRef.current, thinkingDurationRef.current);
-        setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
-        );
+        updateAssistantMessage({ content: assistantContentRef.current });
         break;
       }
 
       case "run.completed": {
         const { response } = event.data as { response: string };
         if (response && !assistantContentRef.current) {
-          const id = assistantIdRef.current;
-          const fullContent = buildMessageContent(thinkingContentRef.current, thinkingDoneRef.current, response, thinkingDurationRef.current);
-          setMessages((prev) =>
-            prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
-          );
+          updateAssistantMessage({ content: response });
         }
         cleanup();
         setIsLoading(false);
@@ -250,7 +228,6 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         break;
       }
 
-      // Tool events — could be surfaced in UI later
       case "tool_call.started":
       case "tool_call.executing":
       case "tool_call.result":
@@ -261,10 +238,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       case "confirmation.required":
       case "confirmation.resolved":
       case "error":
-        // For now, these are no-ops on the frontend
         break;
     }
-  }, [cleanup]);
+  }, [cleanup, updateAssistantMessage]);
 
   return {
     messages,

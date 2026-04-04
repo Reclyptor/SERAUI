@@ -55,6 +55,8 @@ export function useChatPersistence({
             id: m.id,
             role: m.role,
             content: m.content,
+            thinking: m.thinking,
+            thinkingDuration: m.thinkingDuration,
             createdAt: m.createdAt,
           }));
 
