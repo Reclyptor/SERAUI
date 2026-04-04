@@ -5,6 +5,13 @@ import type { Message } from "@/app/actions/chat";
 
 const API_BASE = "/api/v1/agent";
 
+function buildMessageContent(thinking: string, thinkingDone: boolean, text: string, durationSec?: number): string {
+  if (!thinking) return text;
+  const tag = durationSec != null ? `[THINKING:${durationSec}]` : "[THINKING]";
+  if (thinkingDone) return `${tag}\n${thinking}\n[/THINKING]\n${text}`;
+  return `${tag}\n${thinking}`;
+}
+
 interface AgentEvent {
   type: string;
   runId: string;
@@ -38,6 +45,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const abortRef = useRef<AbortController | null>(null);
   const assistantContentRef = useRef("");
   const assistantIdRef = useRef("");
+  const thinkingContentRef = useRef("");
+  const thinkingDoneRef = useRef(false);
+  const thinkingStartTimeRef = useRef<number | null>(null);
+  const thinkingDurationRef = useRef<number | undefined>(undefined);
 
   // Sync initial messages when they change (e.g., hydration from server)
   const hydratedRef = useRef(false);
@@ -111,6 +122,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       // 2. Prepare assistant message
       assistantIdRef.current = crypto.randomUUID();
       assistantContentRef.current = "";
+      thinkingContentRef.current = "";
+      thinkingDoneRef.current = false;
+      thinkingStartTimeRef.current = null;
+      thinkingDurationRef.current = undefined;
 
       const assistantMessage: Message = {
         id: assistantIdRef.current,
@@ -151,13 +166,44 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
 
   const handleEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
+      case "thinking.delta": {
+        if (thinkingStartTimeRef.current === null) {
+          thinkingStartTimeRef.current = Date.now();
+        }
+        const { content } = event.data as { content: string };
+        thinkingContentRef.current += content;
+        const id = assistantIdRef.current;
+        const fullContent = buildMessageContent(thinkingContentRef.current, false, assistantContentRef.current);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
+        );
+        break;
+      }
+
+      case "thinking.done": {
+        const { content } = event.data as { content: string };
+        if (content) {
+          thinkingContentRef.current = content;
+        }
+        thinkingDoneRef.current = true;
+        if (thinkingStartTimeRef.current !== null) {
+          thinkingDurationRef.current = Math.round((Date.now() - thinkingStartTimeRef.current) / 1000);
+        }
+        const id = assistantIdRef.current;
+        const fullContent = buildMessageContent(thinkingContentRef.current, true, assistantContentRef.current, thinkingDurationRef.current);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
+        );
+        break;
+      }
+
       case "text.delta": {
         const { content } = event.data as { content: string };
         assistantContentRef.current += content;
-        const currentContent = assistantContentRef.current;
         const id = assistantIdRef.current;
+        const fullContent = buildMessageContent(thinkingContentRef.current, thinkingDoneRef.current, assistantContentRef.current, thinkingDurationRef.current);
         setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: currentContent } : m))
+          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
         );
         break;
       }
@@ -166,21 +212,22 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         const { content } = event.data as { content: string };
         if (content) {
           assistantContentRef.current = content;
-          const id = assistantIdRef.current;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === id ? { ...m, content } : m))
-          );
         }
+        const id = assistantIdRef.current;
+        const fullContent = buildMessageContent(thinkingContentRef.current, thinkingDoneRef.current, assistantContentRef.current, thinkingDurationRef.current);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
+        );
         break;
       }
 
       case "run.completed": {
         const { response } = event.data as { response: string };
         if (response && !assistantContentRef.current) {
-          // If no text deltas came through, set the full response
           const id = assistantIdRef.current;
+          const fullContent = buildMessageContent(thinkingContentRef.current, thinkingDoneRef.current, response, thinkingDurationRef.current);
           setMessages((prev) =>
-            prev.map((m) => (m.id === id ? { ...m, content: response } : m))
+            prev.map((m) => (m.id === id ? { ...m, content: fullContent } : m))
           );
         }
         cleanup();
