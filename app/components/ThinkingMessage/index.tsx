@@ -183,10 +183,10 @@ export function ThinkingMessage({ content, isLoading, isLatest }: ThinkingMessag
             <div
               ref={scrollRef}
               className={[
-                "mt-2 p-4 h-[100px] text-[11px] text-foreground-muted font-mono leading-relaxed",
-                "bg-background-secondary rounded-md overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words",
+                "mt-1 pl-3 max-h-[200px] text-[12px] text-foreground-muted/70 leading-relaxed",
+                "overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words",
                 "transition-[border-color] duration-300",
-                isStreaming ? "border-l-2 border-l-accent border border-border" : "border border-border",
+                isStreaming ? "border-l-2 border-l-accent" : "border-l border-l-border",
               ].join(" ")}
             >
               {isThinkingComplete ? (
