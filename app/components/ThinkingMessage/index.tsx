@@ -69,9 +69,10 @@ function BlinkingCaret() {
 interface ThinkingMessageProps {
   content: string;
   isLoading?: boolean;
+  isLatest?: boolean;
 }
 
-export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
+export function ThinkingMessage({ content, isLoading, isLatest }: ThinkingMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const thinkingTextRef = useRef<HTMLSpanElement>(null);
   const responseTextRef = useRef<HTMLSpanElement>(null);
@@ -105,21 +106,26 @@ export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
     return { thinking, response, isThinkingComplete, embeddedDuration };
   }, [content]);
 
-  const [isOpen, setIsOpen] = useState(() => !isThinkingComplete);
-  const [isCollapsed, setIsCollapsed] = useState(isThinkingComplete);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (!isThinkingComplete) return false;
+    return !isLatest;
+  });
   const responseComplete = !isLoading;
+  const userToggledRef = useRef(false);
 
   const handleToggle = useCallback(() => {
-    setIsOpen((prev) => !prev);
+    userToggledRef.current = true;
     setIsCollapsed((prev) => !prev);
   }, []);
 
   useEffect(() => {
-    if (isThinkingComplete && isOpen) {
+    if (userToggledRef.current) return;
+    if (!isThinkingComplete) return;
+
+    if (!isLatest) {
       setIsCollapsed(true);
-      setIsOpen(false);
     }
-  }, [isThinkingComplete]);
+  }, [isThinkingComplete, isLatest]);
 
   useCharStream(thinking ?? "", isThinkingComplete, thinkingTextRef, scrollRef);
   useCharStream(response, responseComplete, responseTextRef);
@@ -183,7 +189,11 @@ export function ThinkingMessage({ content, isLoading }: ThinkingMessageProps) {
                 isStreaming ? "border-l-2 border-l-accent border border-border" : "border border-border",
               ].join(" ")}
             >
-              <span ref={thinkingTextRef} />
+              {isThinkingComplete ? (
+                <span>{thinking}</span>
+              ) : (
+                <span ref={thinkingTextRef} />
+              )}
             </div>
           </div>
         </div>

@@ -8,9 +8,10 @@ import type { Message } from "@/app/actions/chat";
 interface ChatMessageProps {
   message: Message;
   isLoading?: boolean;
+  isLatestAssistant?: boolean;
 }
 
-export function ChatMessage({ message, isLoading }: ChatMessageProps) {
+export function ChatMessage({ message, isLoading, isLatestAssistant }: ChatMessageProps) {
   const role = (message.role || "").toLowerCase();
 
   if (role === "user") {
@@ -18,7 +19,7 @@ export function ChatMessage({ message, isLoading }: ChatMessageProps) {
   }
 
   if (role === "assistant") {
-    return <AssistantMessage message={message} isLoading={isLoading} />;
+    return <AssistantMessage message={message} isLoading={isLoading} isLatest={isLatestAssistant} />;
   }
 
   return null;
@@ -63,13 +64,15 @@ function UserMessage({ message }: { message: Message }) {
 function AssistantMessage({
   message,
   isLoading,
+  isLatest,
 }: {
   message: Message;
   isLoading?: boolean;
+  isLatest?: boolean;
 }) {
   return (
     <div className="py-4 max-w-[672px] mx-auto w-full">
-      <ThinkingMessage content={message.content || ""} isLoading={isLoading} />
+      <ThinkingMessage content={message.content || ""} isLoading={isLoading} isLatest={isLatest} />
     </div>
   );
 }

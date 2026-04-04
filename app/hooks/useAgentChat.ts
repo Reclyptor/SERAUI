@@ -90,8 +90,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     setMessages(currentMessages);
     setIsLoading(true);
 
-    // Build conversation history for the backend
-    const conversationHistory = currentMessages
+    // Build conversation history WITHOUT the new message — the backend appends it
+    const conversationHistory = messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
 

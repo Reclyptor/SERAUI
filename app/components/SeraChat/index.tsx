@@ -82,6 +82,8 @@ export function SeraChat({
     messages.length > 0 &&
     messages[messages.length - 1].role === "user";
 
+  const lastAssistantIndex = messages.findLastIndex((m) => m.role === "assistant");
+
   return (
     <div className="flex h-full w-full flex-col bg-background relative">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pb-4">
@@ -91,6 +93,7 @@ export function SeraChat({
               key={message.id}
               message={message}
               isLoading={index === messages.length - 1 && isLoading}
+              isLatestAssistant={index === lastAssistantIndex}
             />
           ))}
 
