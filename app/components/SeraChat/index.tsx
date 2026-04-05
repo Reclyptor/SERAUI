@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAgentChat } from "../../hooks/useAgentChat";
 import { useChat } from "../../contexts/ChatContext";
@@ -24,7 +24,7 @@ export function SeraChat({
 }: SeraChatProps) {
   const router = useRouter();
   const { refreshChats } = useChat();
-  const { messages, sendMessage, isLoading, chatId, stopGeneration } =
+  const { messages, sendMessage, isLoading, chatId, stopGeneration, queue, dismissFromQueue } =
     useAgentChat({
       initialMessages,
       chatId: chatID,
@@ -34,18 +34,18 @@ export function SeraChat({
   const [announcements, setAnnouncements] = useState<Message[]>([]);
   const hasNavigatedRef = useRef(false);
 
-  // Navigate to new chat URL + refresh sidebar after streaming completes
+  // Navigate to new chat URL + refresh sidebar after queue drains
   const prevLoadingRef = useRef(false);
   useEffect(() => {
     if (prevLoadingRef.current && !isLoading) {
-      if (!chatID && chatId && !hasNavigatedRef.current) {
+      if (!chatID && chatId && !hasNavigatedRef.current && queue.length === 0) {
         hasNavigatedRef.current = true;
         router.replace(`/chat/${chatId}`);
       }
       refreshChats();
     }
     prevLoadingRef.current = isLoading;
-  }, [isLoading, chatID, chatId, router, refreshChats]);
+  }, [isLoading, chatID, chatId, router, refreshChats, queue]);
 
   // Expose append for sibling components
   useEffect(() => {
@@ -73,7 +73,7 @@ export function SeraChat({
   if (chatID === null && messages.length === 0) {
     return (
       <div className="flex h-full w-full flex-col bg-background">
-        <WelcomeView onSend={sendMessage} isLoading={isLoading} />
+        <WelcomeView onSend={sendMessage} />
       </div>
     );
   }
@@ -122,6 +122,8 @@ export function SeraChat({
           inProgress={isLoading}
           onSend={sendMessage}
           onStop={stopGeneration}
+          queue={queue}
+          onDismissFromQueue={dismissFromQueue}
         />
       </div>
     </div>

@@ -28,6 +28,8 @@ interface UseAgentChatReturn {
   sendMessage: (content: string) => Promise<void>;
   stopGeneration: () => void;
   setMessages: (messages: Message[]) => void;
+  queue: string[];
+  dismissFromQueue: (index: number) => void;
 }
 
 export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatReturn {
@@ -36,9 +38,11 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const [chatId, setChatId] = useState<string | null>(options.chatId ?? null);
   const [threadId, setThreadId] = useState<string | null>(options.threadId ?? null);
   const [runId, setRunId] = useState<string | null>(null);
+  const [queue, setQueue] = useState<string[]>([]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const sendingRef = useRef(false);
   const assistantContentRef = useRef("");
   const assistantIdRef = useRef("");
   const thinkingContentRef = useRef("");
@@ -67,6 +71,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     if (runId) {
       fetch(`${API_BASE}/cancel/${runId}`, { method: "POST" }).catch(() => {});
     }
+    sendingRef.current = false;
     cleanup();
     setIsLoading(false);
   }, [runId, cleanup]);
@@ -79,7 +84,12 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   }, []);
 
   const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || isLoading) return;
+    if (!content.trim()) return;
+    if (sendingRef.current) {
+      setQueue(prev => [...prev, content]);
+      return;
+    }
+    sendingRef.current = true;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -145,10 +155,12 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       };
 
       es.onerror = () => {
+        sendingRef.current = false;
         cleanup();
         setIsLoading(false);
       };
     } catch (error) {
+      sendingRef.current = false;
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
@@ -156,7 +168,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       cleanup();
       setIsLoading(false);
     }
-  }, [messages, isLoading, chatId, threadId, cleanup]);
+  }, [messages, chatId, threadId, cleanup]);
 
   const handleEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -207,6 +219,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         if (response && !assistantContentRef.current) {
           updateAssistantMessage({ content: response });
         }
+        sendingRef.current = false;
         cleanup();
         setIsLoading(false);
         break;
@@ -222,6 +235,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
               : m
           )
         );
+        sendingRef.current = false;
         cleanup();
         setIsLoading(false);
         break;
@@ -241,6 +255,19 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     }
   }, [cleanup, updateAssistantMessage]);
 
+  const dismissFromQueue = useCallback((index: number) => {
+    setQueue(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Dequeue next message when the current run completes
+  useEffect(() => {
+    if (!isLoading && queue.length > 0 && !sendingRef.current) {
+      const [next, ...rest] = queue;
+      setQueue(rest);
+      sendMessage(next);
+    }
+  }, [isLoading, queue, sendMessage]);
+
   return {
     messages,
     isLoading,
@@ -250,5 +277,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     sendMessage,
     stopGeneration,
     setMessages,
+    queue,
+    dismissFromQueue,
   };
 }

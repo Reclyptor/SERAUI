@@ -1,14 +1,12 @@
 "use client";
 
-import clsx from "clsx";
 import { ImageIcon, SendIcon } from "../Icons";
 
 interface WelcomeViewProps {
   onSend: (message: string) => void;
-  isLoading?: boolean;
 }
 
-export function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
+export function WelcomeView({ onSend }: WelcomeViewProps) {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -48,7 +46,6 @@ export function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
             className="flex-1 bg-transparent text-foreground text-sm px-4 pt-4 pb-2 resize-none outline-none placeholder-foreground-muted min-h-[24px] max-h-[200px]"
             rows={1}
             onKeyDown={handleKeyDown}
-            disabled={isLoading}
             onInput={(e) => {
               const target = e.target as HTMLTextAreaElement;
               target.style.height = "auto";
@@ -69,8 +66,7 @@ export function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
 
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-background transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-background transition-colors"
               title="Send message"
             >
               <SendIcon className="w-4 h-4" />

@@ -3,7 +3,6 @@
 import { useState, useRef } from "react";
 import clsx from "clsx";
 import { useImageCache } from "../../contexts/ImageCacheContext";
-import { IconButton } from "../IconButton";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 import { uploadImage as uploadImageAction } from "@/app/actions/chat";
@@ -12,9 +11,11 @@ interface ImageUploadInputProps {
   inProgress: boolean;
   onSend: (text: string) => Promise<any>;
   onStop?: () => void;
+  queue: string[];
+  onDismissFromQueue: (index: number) => void;
 }
 
-export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInputProps) {
+export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissFromQueue }: ImageUploadInputProps) {
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<Array<{ id: string; file: File; preview: string }>>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -84,6 +85,7 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
   };
 
   const handleSubmit = async () => {
+    if (uploading) return;
     if (!message.trim() && images.length === 0) return;
 
     const userMessage = message || "Analyze this image";
@@ -91,11 +93,9 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
     try {
       setUploading(true);
 
-      // Upload all images first and get their IDs
       const imageIDs = await Promise.all(
         images.map(async (img) => {
           const id = await uploadImage(img.file);
-          // Cache the preview for later display
           addImage(id, img.preview, img.file.type);
           return id;
         })
@@ -103,14 +103,12 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
 
       clearOldImages();
 
-      // Build message with image ID references
       let finalMessage = userMessage;
       if (imageIDs.length > 0) {
         const imageMarkers = imageIDs.map(id => `[IMG:${id}]`).join(' ');
         finalMessage = `${userMessage} ${imageMarkers}`;
       }
 
-      // Clear input immediately after sending
       setMessage("");
       setImages([]);
       if (textareaRef.current) {
@@ -120,7 +118,6 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
       await onSend(finalMessage);
     } catch (error) {
       console.error("Failed to send message:", error);
-      // Don't show alert for auth errors - they're handled by redirect
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       if (errorMessage !== "Session expired") {
         console.error("[ImageUploadInput] Error:", errorMessage);
@@ -143,8 +140,31 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
     target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
   };
 
+  const canSend = message.trim() || images.length > 0;
+
+  const actionButtonBase =
+    "w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+
   return (
     <div className="flex flex-col w-full p-4 bg-background items-center">
+      {queue.length > 0 && (
+        <div className="flex flex-col gap-1 w-full max-w-[672px] px-4 pb-2">
+          {queue.map((msg, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-xs text-foreground-muted truncate flex-1">
+                Queued: {msg}
+              </span>
+              <button
+                onClick={() => onDismissFromQueue(i)}
+                className="text-xs text-foreground-muted hover:text-foreground shrink-0 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         className={clsx(
           "relative flex flex-col w-full max-w-[672px] bg-background-secondary rounded-3xl transition-colors",
@@ -183,17 +203,17 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
-          placeholder={isDragging ? "Drop images here..." : uploading ? "Uploading images..." : "Reply..."}
+          placeholder={isDragging ? "Drop images here..." : uploading ? "Uploading images..." : inProgress ? "Queue a message..." : "Reply..."}
           className="flex-1 bg-transparent text-foreground text-sm px-4 pt-4 pb-2 resize-none outline-none placeholder-foreground-muted min-h-[24px] max-h-[200px]"
           rows={1}
-          disabled={inProgress || uploading}
+          autoFocus
         />
 
         <div className="flex items-center justify-between px-3 pb-3">
           <div className="flex items-center gap-1">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={inProgress || uploading}
+              disabled={uploading}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors disabled:opacity-50"
               title="Upload image"
             >
@@ -202,20 +222,23 @@ export function ImageUploadInput({ inProgress, onSend, onStop }: ImageUploadInpu
           </div>
 
           <div className="flex items-center gap-2">
-            {inProgress && onStop ? (
-              <IconButton onClick={onStop} variant="danger" title="Stop generation">
-                <StopIcon />
-              </IconButton>
-            ) : (
+            {inProgress && onStop && (
               <button
-                onClick={handleSubmit}
-                disabled={(!message.trim() && images.length === 0) || inProgress || uploading}
-                className="w-8 h-8 flex items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-background transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Send message"
+                onClick={onStop}
+                className={clsx(actionButtonBase, "bg-[#e74c3c] hover:bg-[#c0392b] text-white")}
+                title="Stop generation"
               >
-                <SendIcon className="w-4 h-4" />
+                <StopIcon className="w-4 h-4" />
               </button>
             )}
+            <button
+              onClick={handleSubmit}
+              disabled={!canSend || uploading}
+              className={clsx(actionButtonBase, "bg-accent hover:bg-accent-hover text-background")}
+              title={inProgress ? "Queue message" : "Send message"}
+            >
+              <SendIcon className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
