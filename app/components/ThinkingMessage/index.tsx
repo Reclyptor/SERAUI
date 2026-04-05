@@ -55,16 +55,58 @@ function useCharStream(
   }, [flushed, nodeRef, scrollContainerRef]);
 }
 
-function BlinkingCaret() {
-  return (
-    <span
-      className="inline font-semibold text-accent"
-      style={{ animation: "pulse 0.8s steps(1) infinite" }}
-    >
-      ▎
-    </span>
-  );
+function useProgressiveReveal(content: string, streaming: boolean): string {
+  const targetRef = useRef(content);
+  const indexRef = useRef(streaming ? 0 : content.length);
+  const rafRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const [display, setDisplay] = useState(streaming ? "" : content);
+
+  targetRef.current = content;
+
+  useEffect(() => {
+    if (!streaming) {
+      cancelAnimationFrame(rafRef.current);
+      indexRef.current = targetRef.current.length;
+      setDisplay(targetRef.current);
+      return;
+    }
+
+    function tick(now: number) {
+      const target = targetRef.current;
+      const current = indexRef.current;
+
+      if (current < target.length && now - lastTimeRef.current >= 30) {
+        const behind = target.length - current;
+        const step = Math.max(1, Math.ceil(behind / 6));
+        const next = Math.min(current + step, target.length);
+        indexRef.current = next;
+        setDisplay(target.substring(0, next));
+        lastTimeRef.current = now;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [streaming]);
+
+  return display;
 }
+
+const caretStyles = `
+.streaming-caret > div > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after,
+.streaming-caret > div > :last-child:is(ul, ol) > li:last-child::after,
+.streaming-caret > div > blockquote:last-child > :last-child::after,
+.streaming-caret > div > pre:last-child code::after,
+.streaming-caret > div > table:last-child tr:last-child td:last-child::after {
+  content: " ▎";
+  font-weight: 600;
+  color: var(--color-accent);
+  animation: pulse 0.8s steps(1) infinite;
+}
+`;
 
 interface ThinkingMessageProps {
   content: string;
@@ -83,9 +125,9 @@ export function ThinkingMessage({
 }: ThinkingMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const thinkingTextRef = useRef<HTMLSpanElement>(null);
-  const responseTextRef = useRef<HTMLSpanElement>(null);
 
   const isThinkingComplete = thinkingDuration != null;
+  const displayContent = useProgressiveReveal(content, !!isLoading);
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     if (!isThinkingComplete) return false;
@@ -109,7 +151,6 @@ export function ThinkingMessage({
   }, [isThinkingComplete, isLatest]);
 
   useCharStream(thinking ?? "", isThinkingComplete, thinkingTextRef, scrollRef);
-  useCharStream(content, responseComplete, responseTextRef);
 
   if (!thinking) {
     if (!content && isLoading) {
@@ -123,16 +164,12 @@ export function ThinkingMessage({
       );
     }
 
-    if (isLoading) {
-      return (
-        <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap break-words">
-          <span ref={responseTextRef} />
-          <BlinkingCaret />
-        </div>
-      );
-    }
-
-    return <Markdown content={content} />;
+    return (
+      <div className={isLoading ? "streaming-caret" : undefined}>
+        {isLoading && <style>{caretStyles}</style>}
+        <Markdown content={displayContent} />
+      </div>
+    );
   }
 
   const label = isThinkingComplete
@@ -140,7 +177,6 @@ export function ThinkingMessage({
     : "Thinking...";
 
   const isStreaming = !isThinkingComplete;
-  const isResponseStreaming = isThinkingComplete && !responseComplete;
 
   return (
     <div className="space-y-4">
@@ -180,12 +216,10 @@ export function ThinkingMessage({
         </div>
       </div>
 
-      {responseComplete ? (
-        content ? <Markdown content={content} /> : null
-      ) : isResponseStreaming ? (
-        <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap break-words">
-          <span ref={responseTextRef} />
-          <BlinkingCaret />
+      {content ? (
+        <div className={!responseComplete ? "streaming-caret" : undefined}>
+          {!responseComplete && <style>{caretStyles}</style>}
+          <Markdown content={displayContent} />
         </div>
       ) : null}
     </div>
