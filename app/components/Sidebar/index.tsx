@@ -81,7 +81,7 @@ export function Sidebar() {
   const [contentCollapsed, setContentCollapsed] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const { recentChats } = useChat();
+  const { recentChats, startNewChat } = useChat();
 
   // Derive current chat ID from URL
   const currentChatID = pathname.match(/^\/chat\/(.+)/)?.[1] ?? null;
@@ -91,7 +91,10 @@ export function Sidebar() {
     title: chat.title,
   }));
 
-  const handleNewChat = () => router.push("/new");
+  const handleNewChat = () => {
+    startNewChat();
+    router.push("/new");
+  };
   const handleSelectChat = (chatID: string) => {
     if (currentChatID === chatID) return;
     router.push(`/chat/${chatID}`);

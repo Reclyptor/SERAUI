@@ -15,6 +15,8 @@ interface ChatContextValue {
   isLoading: boolean;
   error: string | null;
   refreshChats: () => Promise<void>;
+  sessionId: string;
+  startNewChat: () => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -23,6 +25,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [recentChats, setRecentChats] = useState<ChatListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
 
   const refreshChats = useCallback(async () => {
     try {
@@ -33,6 +36,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       console.error("Failed to fetch chats:", err);
       setError("Failed to load chats");
     }
+  }, []);
+
+  const startNewChat = useCallback(() => {
+    setSessionId(crypto.randomUUID());
   }, []);
 
   useEffect(() => {
@@ -47,6 +54,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         isLoading,
         error,
         refreshChats,
+        sessionId,
+        startNewChat,
       }}
     >
       {children}

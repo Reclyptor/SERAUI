@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAgentChat } from "../../hooks/useAgentChat";
 import { useChat } from "../../contexts/ChatContext";
 import { ChatMessage } from "../ChatMessage";
@@ -22,7 +21,6 @@ export function SeraChat({
   initialMessages,
   appendMessageRef,
 }: SeraChatProps) {
-  const router = useRouter();
   const { refreshChats } = useChat();
   const { messages, sendMessage, isLoading, chatId, stopGeneration, queue, dismissFromQueue } =
     useAgentChat({
@@ -34,18 +32,18 @@ export function SeraChat({
   const [announcements, setAnnouncements] = useState<Message[]>([]);
   const hasNavigatedRef = useRef(false);
 
-  // Navigate to new chat URL + refresh sidebar after queue drains
+  // Update URL + refresh sidebar after streaming completes
   const prevLoadingRef = useRef(false);
   useEffect(() => {
     if (prevLoadingRef.current && !isLoading) {
-      if (!chatID && chatId && !hasNavigatedRef.current && queue.length === 0) {
+      if (!chatID && chatId && !hasNavigatedRef.current) {
         hasNavigatedRef.current = true;
-        router.replace(`/chat/${chatId}`);
+        window.history.replaceState(null, "", `/chat/${chatId}`);
       }
       refreshChats();
     }
     prevLoadingRef.current = isLoading;
-  }, [isLoading, chatID, chatId, router, refreshChats, queue]);
+  }, [isLoading, chatID, chatId, refreshChats]);
 
   // Expose append for sibling components
   useEffect(() => {
