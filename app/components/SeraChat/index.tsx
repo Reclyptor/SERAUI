@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAgentChat } from "../../hooks/useAgentChat";
 import { useChat } from "../../contexts/ChatContext";
 import { ChatMessage } from "../ChatMessage";
+import { ConfirmationCard } from "../ConfirmationCard";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { WelcomeView } from "../WelcomeView";
 import type { Message } from "@/app/actions/chat";
@@ -22,11 +23,13 @@ export function SeraChat({
   appendMessageRef,
 }: SeraChatProps) {
   const { refreshChats } = useChat();
-  const { messages, sendMessage, isLoading, chatId, stopGeneration, queue, dismissFromQueue } =
-    useAgentChat({
-      initialMessages,
-      chatId: chatID,
-    });
+  const {
+    messages, sendMessage, isLoading, chatId, stopGeneration,
+    queue, dismissFromQueue, pendingConfirmations, resolveConfirmation,
+  } = useAgentChat({
+    initialMessages,
+    chatId: chatID,
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [announcements, setAnnouncements] = useState<Message[]>([]);
@@ -65,7 +68,7 @@ export function SeraChat({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, pendingConfirmations]);
 
   // Welcome view on /new with no messages
   if (chatID === null && messages.length === 0) {
@@ -100,6 +103,14 @@ export function SeraChat({
 
           {announcements.map((msg) => (
             <ChatMessage key={msg.id} message={msg} isLoading={false} />
+          ))}
+
+          {pendingConfirmations.map((c) => (
+            <ConfirmationCard
+              key={c.confirmationId}
+              confirmation={c}
+              onResolve={resolveConfirmation}
+            />
           ))}
 
           {showPendingIndicator && (

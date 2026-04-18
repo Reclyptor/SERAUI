@@ -5,6 +5,14 @@ import type { Message } from "@/app/actions/chat";
 
 const API_BASE = "/api/v1/agent";
 
+export interface PendingConfirmation {
+  confirmationId: string;
+  actionName: string;
+  args: Record<string, unknown>;
+  message: string;
+  threadId: string;
+}
+
 interface AgentEvent {
   type: string;
   runId: string;
@@ -30,6 +38,8 @@ interface UseAgentChatReturn {
   setMessages: (messages: Message[]) => void;
   queue: string[];
   dismissFromQueue: (index: number) => void;
+  pendingConfirmations: PendingConfirmation[];
+  resolveConfirmation: (confirmationId: string, approved: boolean, feedback?: string) => Promise<void>;
 }
 
 export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatReturn {
@@ -39,6 +49,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const [threadId, setThreadId] = useState<string | null>(options.threadId ?? null);
   const [runId, setRunId] = useState<string | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
+  const [pendingConfirmations, setPendingConfirmations] = useState<PendingConfirmation[]>([]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -241,6 +252,28 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         break;
       }
 
+      case "confirmation.required": {
+        const { confirmationId, actionName, args, message } = event.data as {
+          confirmationId: string;
+          actionName: string;
+          args: Record<string, unknown>;
+          message: string;
+        };
+        setPendingConfirmations((prev) => [
+          ...prev,
+          { confirmationId, actionName, args, message, threadId: event.threadId },
+        ]);
+        break;
+      }
+
+      case "confirmation.resolved": {
+        const { confirmationId } = event.data as { confirmationId: string };
+        setPendingConfirmations((prev) =>
+          prev.filter((c) => c.confirmationId !== confirmationId)
+        );
+        break;
+      }
+
       case "tool_call.started":
       case "tool_call.executing":
       case "tool_call.result":
@@ -248,12 +281,38 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       case "plan.created":
       case "plan.step_updated":
       case "evaluation.done":
-      case "confirmation.required":
-      case "confirmation.resolved":
       case "error":
         break;
     }
   }, [cleanup, updateAssistantMessage]);
+
+  const resolveConfirmation = useCallback(
+    async (confirmationId: string, approved: boolean, feedback?: string) => {
+      const confirmation = pendingConfirmations.find(
+        (c) => c.confirmationId === confirmationId
+      );
+      if (!confirmation) return;
+
+      try {
+        const res = await fetch(
+          `${API_BASE}/confirm/${confirmation.threadId}/${confirmationId}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ approved, feedback }),
+          }
+        );
+        if (res.ok) {
+          setPendingConfirmations((prev) =>
+            prev.filter((c) => c.confirmationId !== confirmationId)
+          );
+        }
+      } catch (err) {
+        console.error("[useAgentChat] Failed to resolve confirmation:", err);
+      }
+    },
+    [pendingConfirmations]
+  );
 
   const dismissFromQueue = useCallback((index: number) => {
     setQueue(prev => prev.filter((_, i) => i !== index));
@@ -279,5 +338,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     setMessages,
     queue,
     dismissFromQueue,
+    pendingConfirmations,
+    resolveConfirmation,
   };
 }
