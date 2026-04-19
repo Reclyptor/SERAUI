@@ -5,7 +5,7 @@ import type { PendingConfirmation } from "../../hooks/useAgentChat";
 
 interface ConfirmationCardProps {
   confirmation: PendingConfirmation;
-  onResolve: (confirmationId: string, approved: boolean, feedback?: string) => Promise<void>;
+  onResolve: (confirmationID: string, approved: boolean, feedback?: string) => Promise<void>;
 }
 
 export function ConfirmationCard({ confirmation, onResolve }: ConfirmationCardProps) {
@@ -16,7 +16,7 @@ export function ConfirmationCard({ confirmation, onResolve }: ConfirmationCardPr
   const handleResolve = async (approved: boolean) => {
     setResolving(true);
     await onResolve(
-      confirmation.confirmationId,
+      confirmation.confirmationID,
       approved,
       feedback.trim() || undefined,
     );

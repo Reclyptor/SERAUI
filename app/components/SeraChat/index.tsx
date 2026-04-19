@@ -24,11 +24,11 @@ export function SeraChat({
 }: SeraChatProps) {
   const { refreshChats } = useChat();
   const {
-    messages, sendMessage, isLoading, chatId, stopGeneration,
+    messages, sendMessage, isLoading, chatID: activeChatID, stopGeneration,
     queue, dismissFromQueue, pendingConfirmations, resolveConfirmation,
   } = useAgentChat({
     initialMessages,
-    chatId: chatID,
+    chatID,
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -39,14 +39,14 @@ export function SeraChat({
   const prevLoadingRef = useRef(false);
   useEffect(() => {
     if (prevLoadingRef.current && !isLoading) {
-      if (!chatID && chatId && !hasNavigatedRef.current) {
+      if (!chatID && activeChatID && !hasNavigatedRef.current) {
         hasNavigatedRef.current = true;
-        window.history.replaceState(null, "", `/chat/${chatId}`);
+        window.history.replaceState(null, "", `/chat/${activeChatID}`);
       }
       refreshChats();
     }
     prevLoadingRef.current = isLoading;
-  }, [isLoading, chatID, chatId, refreshChats]);
+  }, [isLoading, chatID, activeChatID, refreshChats]);
 
   // Expose append for sibling components
   useEffect(() => {
@@ -107,7 +107,7 @@ export function SeraChat({
 
           {pendingConfirmations.map((c) => (
             <ConfirmationCard
-              key={c.confirmationId}
+              key={c.confirmationID}
               confirmation={c}
               onResolve={resolveConfirmation}
             />

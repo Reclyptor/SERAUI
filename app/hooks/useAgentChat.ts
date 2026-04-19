@@ -6,48 +6,48 @@ import type { Message } from "@/app/actions/chat";
 const API_BASE = "/api/v1/agent";
 
 export interface PendingConfirmation {
-  confirmationId: string;
+  confirmationID: string;
   actionName: string;
   args: Record<string, unknown>;
   message: string;
-  threadId: string;
+  threadID: string;
 }
 
 interface AgentEvent {
   type: string;
-  runId: string;
-  threadId: string;
+  runID: string;
+  threadID: string;
   timestamp: number;
-  data: any;
+  data: unknown;
 }
 
 interface UseAgentChatOptions {
   initialMessages?: Message[];
-  chatId?: string | null;
-  threadId?: string;
+  chatID?: string | null;
+  threadID?: string;
 }
 
 interface UseAgentChatReturn {
   messages: Message[];
   isLoading: boolean;
-  chatId: string | null;
-  threadId: string | null;
-  runId: string | null;
+  chatID: string | null;
+  threadID: string | null;
+  runID: string | null;
   sendMessage: (content: string) => Promise<void>;
   stopGeneration: () => void;
   setMessages: (messages: Message[]) => void;
   queue: string[];
   dismissFromQueue: (index: number) => void;
   pendingConfirmations: PendingConfirmation[];
-  resolveConfirmation: (confirmationId: string, approved: boolean, feedback?: string) => Promise<void>;
+  resolveConfirmation: (confirmationID: string, approved: boolean, feedback?: string) => Promise<void>;
 }
 
 export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatReturn {
   const [messages, setMessages] = useState<Message[]>(options.initialMessages ?? []);
   const [isLoading, setIsLoading] = useState(false);
-  const [chatId, setChatId] = useState<string | null>(options.chatId ?? null);
-  const [threadId, setThreadId] = useState<string | null>(options.threadId ?? null);
-  const [runId, setRunId] = useState<string | null>(null);
+  const [chatID, setChatID] = useState<string | null>(options.chatID ?? null);
+  const [threadID, setThreadID] = useState<string | null>(options.threadID ?? null);
+  const [runID, setRunID] = useState<string | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
   const [pendingConfirmations, setPendingConfirmations] = useState<PendingConfirmation[]>([]);
 
@@ -79,13 +79,13 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   }, []);
 
   const stopGeneration = useCallback(() => {
-    if (runId) {
-      fetch(`${API_BASE}/cancel/${runId}`, { method: "POST" }).catch(() => {});
+    if (runID) {
+      fetch(`${API_BASE}/cancel/${runID}`, { method: "POST" }).catch(() => {});
     }
     sendingRef.current = false;
     cleanup();
     setIsLoading(false);
-  }, [runId, cleanup]);
+  }, [runID, cleanup]);
 
   const updateAssistantMessage = useCallback((patch: Partial<Message>) => {
     const id = assistantIdRef.current;
@@ -122,8 +122,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: content,
-          chatId: chatId ?? undefined,
-          threadId: threadId ?? undefined,
+          chatID: chatID ?? undefined,
+          threadID: threadID ?? undefined,
         }),
         signal: abortController.signal,
       });
@@ -132,10 +132,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         throw new Error(`Chat request failed: ${response.statusText}`);
       }
 
-      const { runId: newRunId, threadId: newThreadId, chatId: newChatId } = await response.json();
-      setChatId(newChatId);
-      setRunId(newRunId);
-      setThreadId(newThreadId);
+      const { runID: newRunID, threadID: newThreadID, chatID: newChatID } = await response.json();
+      setChatID(newChatID);
+      setRunID(newRunID);
+      setThreadID(newThreadID);
 
       assistantIdRef.current = crypto.randomUUID();
       assistantContentRef.current = "";
@@ -153,7 +153,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      const es = new EventSource(`${API_BASE}/stream/${newRunId}`);
+      const es = new EventSource(`${API_BASE}/stream/${newRunID}`);
       eventSourceRef.current = es;
 
       es.onmessage = (event) => {
@@ -179,7 +179,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       cleanup();
       setIsLoading(false);
     }
-  }, [messages, chatId, threadId, cleanup]);
+  }, [messages, chatID, threadID, cleanup]);
 
   const handleEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -253,23 +253,23 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       }
 
       case "confirmation.required": {
-        const { confirmationId, actionName, args, message } = event.data as {
-          confirmationId: string;
+        const { confirmationID, actionName, args, message } = event.data as {
+          confirmationID: string;
           actionName: string;
           args: Record<string, unknown>;
           message: string;
         };
         setPendingConfirmations((prev) => [
           ...prev,
-          { confirmationId, actionName, args, message, threadId: event.threadId },
+          { confirmationID, actionName, args, message, threadID: event.threadID },
         ]);
         break;
       }
 
       case "confirmation.resolved": {
-        const { confirmationId } = event.data as { confirmationId: string };
+        const { confirmationID } = event.data as { confirmationID: string };
         setPendingConfirmations((prev) =>
-          prev.filter((c) => c.confirmationId !== confirmationId)
+          prev.filter((c) => c.confirmationID !== confirmationID)
         );
         break;
       }
@@ -287,15 +287,15 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   }, [cleanup, updateAssistantMessage]);
 
   const resolveConfirmation = useCallback(
-    async (confirmationId: string, approved: boolean, feedback?: string) => {
+    async (confirmationID: string, approved: boolean, feedback?: string) => {
       const confirmation = pendingConfirmations.find(
-        (c) => c.confirmationId === confirmationId
+        (c) => c.confirmationID === confirmationID
       );
       if (!confirmation) return;
 
       try {
         const res = await fetch(
-          `${API_BASE}/confirm/${confirmation.threadId}/${confirmationId}`,
+          `${API_BASE}/confirm/${confirmation.threadID}/${confirmationID}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -304,7 +304,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         );
         if (res.ok) {
           setPendingConfirmations((prev) =>
-            prev.filter((c) => c.confirmationId !== confirmationId)
+            prev.filter((c) => c.confirmationID !== confirmationID)
           );
         }
       } catch (err) {
@@ -330,9 +330,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   return {
     messages,
     isLoading,
-    chatId,
-    threadId,
-    runId,
+    chatID,
+    threadID,
+    runID,
     sendMessage,
     stopGeneration,
     setMessages,
