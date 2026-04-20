@@ -8,9 +8,7 @@ import {
   Plus,
   Search,
   MessageSquare,
-  Folder,
-  Grid2X2,
-  Code,
+  ScrollText,
   ChevronUp,
   LogOut,
 } from "lucide-react";
@@ -175,6 +173,8 @@ function SidebarContent({
   onSelectChat: (chatID: string) => void;
   currentChatID: string | null;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const { name: userName, initials: userInitials, expiresAt } = useUser();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const { formatted: sessionTimeLeft } = useSessionTimer(expiresAt);
@@ -254,19 +254,11 @@ function SidebarContent({
           isCollapsed={isCollapsed}
         />
         <NavItem
-          icon={<Folder className="w-5 h-5" />}
-          label="Projects"
+          icon={<ScrollText className="w-5 h-5" />}
+          label="Prompts"
+          onClick={() => router.push("/prompts")}
           isCollapsed={isCollapsed}
-        />
-        <NavItem
-          icon={<Grid2X2 className="w-5 h-5" />}
-          label="Artifacts"
-          isCollapsed={isCollapsed}
-        />
-        <NavItem
-          icon={<Code className="w-5 h-5" />}
-          label="Code"
-          isCollapsed={isCollapsed}
+          isActive={pathname === "/prompts"}
         />
       </nav>
 
