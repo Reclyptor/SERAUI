@@ -57,6 +57,32 @@ export function ChevronIcon({ className = "w-2.5 h-2.5", isOpen = false }: IconP
   );
 }
 
+export function DotIcon({ className = "w-2 h-2" }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 8 8" fill="currentColor">
+      <circle cx="4" cy="4" r="3" />
+    </svg>
+  );
+}
+
+export function AgentIcon({ className = "w-3 h-3" }: IconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="5" r="3" />
+      <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" />
+      <circle cx="12.5" cy="3.5" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function CloseIcon({ className = "w-3 h-3" }: IconProps) {
   return (
     <svg

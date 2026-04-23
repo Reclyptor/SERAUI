@@ -1,6 +1,8 @@
 "use client";
 
 import { ThinkingMessage } from "../ThinkingMessage";
+import { ToolCallMessage } from "../ToolCallMessage";
+import { SubagentMessage } from "../SubagentMessage";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import type { Message } from "@/app/actions/chat";
@@ -70,6 +72,9 @@ function AssistantMessage({
   isLoading?: boolean;
   isLatest?: boolean;
 }) {
+  const toolCalls = message.toolCalls;
+  const hasToolCalls = toolCalls && toolCalls.length > 0;
+
   return (
     <div className="py-4 max-w-[672px] mx-auto w-full">
       <ThinkingMessage
@@ -79,6 +84,17 @@ function AssistantMessage({
         isLoading={isLoading}
         isLatest={isLatest}
       />
+      {hasToolCalls && (
+        <div className="mt-1">
+          {toolCalls.map((tc) =>
+            tc.isSubagent ? (
+              <SubagentMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
+            ) : (
+              <ToolCallMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
+            )
+          )}
+        </div>
+      )}
     </div>
   );
 }

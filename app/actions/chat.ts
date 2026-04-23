@@ -6,12 +6,31 @@ import { cookies } from "next/headers";
 const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
 const API_PREFIX = "/api/v1";
 
+export interface SubagentMeta {
+  runID: string;
+  threadID: string;
+  agentID: string;
+  goal: string;
+}
+
+export interface ToolCallBlock {
+  toolCallID: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  status: "started" | "executing" | "completed" | "failed";
+  isSubagent?: boolean;
+  subagentMeta?: SubagentMeta;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   thinking?: string;
   thinkingDuration?: number;
+  toolCalls?: ToolCallBlock[];
   createdAt?: Date;
 }
 

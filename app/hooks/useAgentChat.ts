@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { Message } from "@/app/actions/chat";
+import type { Message, ToolCallBlock } from "@/app/actions/chat";
 
 const API_BASE = "/api/v1/agent";
 
@@ -60,6 +60,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const thinkingDoneRef = useRef(false);
   const thinkingStartTimeRef = useRef<number | null>(null);
   const thinkingDurationRef = useRef<number | undefined>(undefined);
+  const toolCallsRef = useRef<ToolCallBlock[]>([]);
   const reconnectingRef = useRef(false);
   const replayingRef = useRef(false);
   const replayConfirmationsRef = useRef<PendingConfirmation[]>([]);
@@ -193,10 +194,72 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         break;
       }
 
-      case "tool_call.started":
-      case "tool_call.executing":
-      case "tool_call.result":
-      case "tool_call.error":
+      case "tool_call.started": {
+        const { toolCallID, toolName, args } = event.data as {
+          toolCallID: string; toolName: string; args: Record<string, unknown>;
+        };
+        toolCallsRef.current = [
+          ...toolCallsRef.current,
+          { toolCallID, toolName, args, status: "started" },
+        ];
+        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        break;
+      }
+
+      case "tool_call.executing": {
+        const { toolCallID } = event.data as { toolCallID: string };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc
+        );
+        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        break;
+      }
+
+      case "tool_call.result": {
+        const { toolCallID, result } = event.data as {
+          toolCallID: string; result: unknown;
+        };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID ? { ...tc, status: "completed", result } : tc
+        );
+        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        break;
+      }
+
+      case "tool_call.error": {
+        const { toolCallID, error } = event.data as {
+          toolCallID: string; error: string;
+        };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID ? { ...tc, status: "failed", error } : tc
+        );
+        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        break;
+      }
+
+      case "subagent.spawned": {
+        const { toolCallID, subagentRunID, subagentThreadID, agentID, goal } =
+          event.data as {
+            toolCallID: string; subagentRunID: string;
+            subagentThreadID: string; agentID: string; goal: string;
+          };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID
+            ? {
+                ...tc,
+                isSubagent: true,
+                subagentMeta: { runID: subagentRunID, threadID: subagentThreadID, agentID, goal },
+              }
+            : tc
+        );
+        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        break;
+      }
+
+      case "subagent.completed":
+      case "subagent.failed":
+        break;
+
       case "plan.created":
       case "plan.step_updated":
       case "evaluation.done":
@@ -247,6 +310,54 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         );
         break;
       }
+      case "tool_call.started": {
+        const { toolCallID, toolName, args } = event.data as {
+          toolCallID: string; toolName: string; args: Record<string, unknown>;
+        };
+        toolCallsRef.current = [
+          ...toolCallsRef.current,
+          { toolCallID, toolName, args, status: "started" },
+        ];
+        break;
+      }
+      case "tool_call.executing": {
+        const { toolCallID } = event.data as { toolCallID: string };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc
+        );
+        break;
+      }
+      case "tool_call.result": {
+        const { toolCallID, result } = event.data as { toolCallID: string; result: unknown };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID ? { ...tc, status: "completed", result } : tc
+        );
+        break;
+      }
+      case "tool_call.error": {
+        const { toolCallID, error } = event.data as { toolCallID: string; error: string };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID ? { ...tc, status: "failed", error } : tc
+        );
+        break;
+      }
+      case "subagent.spawned": {
+        const { toolCallID, subagentRunID, subagentThreadID, agentID, goal } =
+          event.data as {
+            toolCallID: string; subagentRunID: string;
+            subagentThreadID: string; agentID: string; goal: string;
+          };
+        toolCallsRef.current = toolCallsRef.current.map((tc) =>
+          tc.toolCallID === toolCallID
+            ? {
+                ...tc,
+                isSubagent: true,
+                subagentMeta: { runID: subagentRunID, threadID: subagentThreadID, agentID, goal },
+              }
+            : tc
+        );
+        break;
+      }
       case "run.completed":
       case "run.failed":
         replayTerminalRef.current = event;
@@ -260,6 +371,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     updateAssistantMessage({
       content: assistantContentRef.current,
       thinking: thinkingContentRef.current || undefined,
+      toolCalls: toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
     });
 
     if (replayConfirmationsRef.current.length > 0) {
@@ -281,6 +393,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     thinkingDoneRef.current = false;
     thinkingStartTimeRef.current = null;
     thinkingDurationRef.current = undefined;
+    toolCallsRef.current = [];
     replayingRef.current = replay;
     replayConfirmationsRef.current = [];
     replayTerminalRef.current = null;
