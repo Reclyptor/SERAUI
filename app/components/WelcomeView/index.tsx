@@ -1,12 +1,15 @@
 "use client";
 
 import { ImageIcon, SendIcon } from "../Icons";
+import { ModelSelector } from "../ModelSelector";
 
 interface WelcomeViewProps {
   onSend: (message: string) => void;
+  selectedModel: string;
+  onModelChange: (modelId: string) => void;
 }
 
-export function WelcomeView({ onSend }: WelcomeViewProps) {
+export function WelcomeView({ onSend, selectedModel, onModelChange }: WelcomeViewProps) {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -62,6 +65,10 @@ export function WelcomeView({ onSend }: WelcomeViewProps) {
               >
                 <ImageIcon className="w-5 h-5" />
               </button>
+              <ModelSelector
+                selectedModel={selectedModel}
+                onModelChange={onModelChange}
+              />
             </div>
 
             <button

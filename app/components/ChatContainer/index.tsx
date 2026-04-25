@@ -8,11 +8,13 @@ import type { Message } from "@/app/actions/chat";
 interface ChatContainerProps {
   chatID: string | null;
   initialMessages: Message[];
+  initialModel?: string;
 }
 
 export function ChatContainer({
   chatID,
   initialMessages,
+  initialModel,
 }: ChatContainerProps) {
   const appendMessageRef = useRef<(msg: Message) => void>(undefined);
   const { sessionId } = useChat();
@@ -24,6 +26,7 @@ export function ChatContainer({
           key={sessionId}
           chatID={chatID}
           initialMessages={initialMessages}
+          initialModel={initialModel}
           appendMessageRef={appendMessageRef}
         />
       </div>

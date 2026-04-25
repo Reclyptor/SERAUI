@@ -25,6 +25,7 @@ interface UseAgentChatOptions {
   initialMessages?: Message[];
   chatID?: string | null;
   threadID?: string;
+  initialModel?: string;
 }
 
 interface UseAgentChatReturn {
@@ -33,6 +34,8 @@ interface UseAgentChatReturn {
   chatID: string | null;
   threadID: string | null;
   runID: string | null;
+  model: string | null;
+  setModel: (model: string) => void;
   sendMessage: (content: string) => Promise<void>;
   stopGeneration: () => void;
   setMessages: (messages: Message[]) => void;
@@ -48,6 +51,18 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const [chatID, setChatID] = useState<string | null>(options.chatID ?? null);
   const [threadID, setThreadID] = useState<string | null>(options.threadID ?? null);
   const [runID, setRunID] = useState<string | null>(null);
+  const [model, setModelState] = useState<string | null>(() => {
+    if (options.initialModel) return options.initialModel;
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sera:lastModel");
+    }
+    return null;
+  });
+
+  const setModel = useCallback((value: string) => {
+    setModelState(value);
+    localStorage.setItem("sera:lastModel", value);
+  }, []);
   const [queue, setQueue] = useState<string[]>([]);
   const [pendingConfirmations, setPendingConfirmations] = useState<PendingConfirmation[]>([]);
 
@@ -464,6 +479,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
           message: content,
           chatID: chatID ?? undefined,
           threadID: threadID ?? undefined,
+          model: model ?? undefined,
         }),
         signal: abortController.signal,
       });
@@ -497,7 +513,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       cleanup();
       setIsLoading(false);
     }
-  }, [messages, chatID, threadID, cleanup, subscribeToStream]);
+  }, [messages, chatID, threadID, model, cleanup, subscribeToStream]);
 
   // Check for an active run on mount (handles page refresh mid-stream)
   useEffect(() => {
@@ -583,6 +599,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     chatID,
     threadID,
     runID,
+    model,
+    setModel,
     sendMessage,
     stopGeneration,
     setMessages,

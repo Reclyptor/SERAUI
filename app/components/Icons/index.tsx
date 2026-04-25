@@ -83,6 +83,23 @@ export function AgentIcon({ className = "w-3 h-3" }: IconProps) {
   );
 }
 
+export function ChevronUpDownIcon({ className = "w-3 h-3" }: IconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 15L12 20L17 15" />
+      <path d="M7 9L12 4L17 9" />
+    </svg>
+  );
+}
+
 export function CloseIcon({ className = "w-3 h-3" }: IconProps) {
   return (
     <svg

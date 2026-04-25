@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { useImageCache } from "../../contexts/ImageCacheContext";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
+import { ModelSelector } from "../ModelSelector";
 import { uploadImage as uploadImageAction } from "@/app/actions/chat";
 
 interface ImageUploadInputProps {
@@ -13,9 +14,11 @@ interface ImageUploadInputProps {
   onStop?: () => void;
   queue: string[];
   onDismissFromQueue: (index: number) => void;
+  selectedModel: string;
+  onModelChange: (modelId: string) => void;
 }
 
-export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissFromQueue }: ImageUploadInputProps) {
+export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissFromQueue, selectedModel, onModelChange }: ImageUploadInputProps) {
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<Array<{ id: string; file: File; preview: string }>>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -219,6 +222,11 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
             >
               <ImageIcon className="w-5 h-5" />
             </button>
+            <ModelSelector
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+              disabled={inProgress}
+            />
           </div>
 
           <div className="flex items-center gap-2">

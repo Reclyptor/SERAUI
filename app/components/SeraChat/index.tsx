@@ -7,11 +7,13 @@ import { ChatMessage } from "../ChatMessage";
 import { ConfirmationCard } from "../ConfirmationCard";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { WelcomeView } from "../WelcomeView";
+import { DEFAULT_MODEL } from "@/app/lib/models";
 import type { Message } from "@/app/actions/chat";
 
 interface SeraChatProps {
   chatID: string | null;
   initialMessages: Message[];
+  initialModel?: string;
   appendMessageRef?: React.MutableRefObject<
     ((msg: Message) => void) | undefined
   >;
@@ -20,15 +22,18 @@ interface SeraChatProps {
 export function SeraChat({
   chatID,
   initialMessages,
+  initialModel,
   appendMessageRef,
 }: SeraChatProps) {
   const { refreshChats } = useChat();
   const {
     messages, sendMessage, isLoading, chatID: activeChatID, stopGeneration,
     queue, dismissFromQueue, pendingConfirmations, resolveConfirmation,
+    model, setModel,
   } = useAgentChat({
     initialMessages,
     chatID,
+    initialModel,
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -74,7 +79,11 @@ export function SeraChat({
   if (chatID === null && messages.length === 0) {
     return (
       <div className="flex h-full w-full flex-col bg-background">
-        <WelcomeView onSend={sendMessage} />
+        <WelcomeView
+          onSend={sendMessage}
+          selectedModel={model ?? DEFAULT_MODEL}
+          onModelChange={setModel}
+        />
       </div>
     );
   }
@@ -133,6 +142,8 @@ export function SeraChat({
           onStop={stopGeneration}
           queue={queue}
           onDismissFromQueue={dismissFromQueue}
+          selectedModel={model ?? DEFAULT_MODEL}
+          onModelChange={setModel}
         />
       </div>
     </div>

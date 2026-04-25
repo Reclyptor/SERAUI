@@ -38,6 +38,7 @@ export interface Chat {
   _id: string;
   userID: string;
   title: string;
+  model?: string;
   messages: Message[];
   createdAt: string;
   updatedAt: string;
@@ -47,6 +48,7 @@ export interface ChatListItem {
   _id: string;
   userID: string;
   title: string;
+  model?: string;
   createdAt: string;
   updatedAt: string;
 }

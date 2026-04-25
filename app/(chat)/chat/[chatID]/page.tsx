@@ -15,6 +15,7 @@ export default async function ChatPage({
       <ChatContainer
         chatID={chat._id}
         initialMessages={chat.messages}
+        initialModel={chat.model}
       />
     );
   } catch {
