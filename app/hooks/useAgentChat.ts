@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { Message, ToolCallBlock } from "@/app/actions/chat";
+import { getModelByID } from "@/app/lib/models";
 
 const API_BASE = "/api/v1/agent";
 
@@ -51,13 +52,18 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const [chatID, setChatID] = useState<string | null>(options.chatID ?? null);
   const [threadID, setThreadID] = useState<string | null>(options.threadID ?? null);
   const [runID, setRunID] = useState<string | null>(null);
-  const [model, setModelState] = useState<string | null>(() => {
-    if (options.initialModel) return options.initialModel;
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("sera:lastModel");
+  const [model, setModelState] = useState<string | null>(options.initialModel ?? null);
+
+  useEffect(() => {
+    if (!options.initialModel) {
+      const stored = localStorage.getItem("sera:lastModel");
+      if (stored && getModelByID(stored)) {
+        setModelState(stored);
+      } else if (stored) {
+        localStorage.removeItem("sera:lastModel");
+      }
     }
-    return null;
-  });
+  }, [options.initialModel]);
 
   const setModel = useCallback((value: string) => {
     setModelState(value);
