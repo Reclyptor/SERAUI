@@ -83,18 +83,19 @@ function AssistantMessage({
         thinkingDuration={message.thinkingDuration}
         isLoading={isLoading}
         isLatest={isLatest}
-      />
-      {hasToolCalls && (
-        <div className="mt-1">
-          {toolCalls.map((tc) =>
-            tc.isSubagent ? (
-              <SubagentMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
-            ) : (
-              <ToolCallMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
-            )
-          )}
-        </div>
-      )}
+      >
+        {hasToolCalls && (
+          <div className="mt-1 mb-4">
+            {toolCalls.map((tc) =>
+              tc.isSubagent ? (
+                <SubagentMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
+              ) : (
+                <ToolCallMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
+              )
+            )}
+          </div>
+        )}
+      </ThinkingMessage>
     </div>
   );
 }

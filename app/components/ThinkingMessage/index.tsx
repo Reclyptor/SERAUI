@@ -114,6 +114,7 @@ interface ThinkingMessageProps {
   thinkingDuration?: number;
   isLoading?: boolean;
   isLatest?: boolean;
+  children?: React.ReactNode;
 }
 
 export function ThinkingMessage({
@@ -122,6 +123,7 @@ export function ThinkingMessage({
   thinkingDuration,
   isLoading,
   isLatest,
+  children,
 }: ThinkingMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const thinkingTextRef = useRef<HTMLSpanElement>(null);
@@ -165,9 +167,12 @@ export function ThinkingMessage({
     }
 
     return (
-      <div className={isLoading ? "streaming-caret" : undefined}>
-        {isLoading && <style>{caretStyles}</style>}
-        <Markdown content={displayContent} />
+      <div>
+        {children}
+        <div className={isLoading ? "streaming-caret" : undefined}>
+          {isLoading && <style>{caretStyles}</style>}
+          <Markdown content={displayContent} />
+        </div>
       </div>
     );
   }
@@ -215,6 +220,8 @@ export function ThinkingMessage({
           </div>
         </div>
       </div>
+
+      {children}
 
       {content ? (
         <div className={!responseComplete ? "streaming-caret" : undefined}>
