@@ -87,14 +87,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const replayConfirmationsRef = useRef<PendingConfirmation[]>([]);
   const replayTerminalRef = useRef<AgentEvent | null>(null);
 
-  // Sync initial messages when they change (e.g., hydration from server)
-  const hydratedRef = useRef(false);
-  useEffect(() => {
-    if (!hydratedRef.current && options.initialMessages && options.initialMessages.length > 0) {
-      setMessages(options.initialMessages);
-      hydratedRef.current = true;
-    }
-  }, [options.initialMessages]);
+  const prevChatIDRef = useRef(options.chatID);
 
   const cleanup = useCallback(() => {
     if (eventSourceRef.current) {
@@ -103,6 +96,27 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     }
     abortRef.current = null;
   }, []);
+
+  // Reset all state when switching chats
+  useEffect(() => {
+    if (options.chatID === prevChatIDRef.current) return;
+    prevChatIDRef.current = options.chatID;
+
+    cleanup();
+    setMessages(options.initialMessages ?? []);
+    setChatID(options.chatID ?? null);
+    setThreadID(options.threadID ?? null);
+    setRunID(null);
+    setIsLoading(false);
+    setQueue([]);
+    setPendingConfirmations([]);
+    sendingRef.current = false;
+    reconnectingRef.current = false;
+
+    if (options.initialModel) {
+      setModelState(options.initialModel);
+    }
+  }, [options.chatID, options.initialMessages, options.threadID, options.initialModel, cleanup]);
 
   const stopGeneration = useCallback(() => {
     if (runID) {
