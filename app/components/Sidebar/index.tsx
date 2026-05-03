@@ -8,7 +8,7 @@ import {
   Plus,
   Search,
   MessageSquare,
-  ScrollText,
+  Settings,
   ChevronUp,
   LogOut,
 } from "lucide-react";
@@ -254,11 +254,11 @@ function SidebarContent({
           isCollapsed={isCollapsed}
         />
         <NavItem
-          icon={<ScrollText className="w-5 h-5" />}
-          label="Prompts"
-          onClick={() => router.push("/prompts")}
+          icon={<Settings className="w-5 h-5" />}
+          label="Manage"
+          onClick={() => router.push("/manage")}
           isCollapsed={isCollapsed}
-          isActive={pathname === "/prompts"}
+          isActive={pathname.startsWith("/manage")}
         />
       </nav>
 
