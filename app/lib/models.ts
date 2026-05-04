@@ -13,6 +13,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'openai', label: 'ChatGPT' },
   { id: 'openai/o3', name: 'o3', provider: 'openai', label: 'ChatGPT' },
   { id: 'vllm/Qwen3.6-27B-FP8', name: 'Qwen 3.6 27B FP8', provider: 'vllm', label: 'vLLM' },
+  { id: 'vllm/Huihui-Qwen3.6-27B-abliterated', name: 'Qwen 3.6 27B Abliterated', provider: 'vllm', label: 'vLLM' },
 ];
 
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
