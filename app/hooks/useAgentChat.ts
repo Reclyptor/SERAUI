@@ -135,50 +135,60 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   }, []);
 
   const handleEvent = useCallback((event: AgentEvent) => {
+    const replaying = replayingRef.current;
+
     switch (event.type) {
       case "thinking.delta": {
-        if (thinkingStartTimeRef.current === null) {
-          thinkingStartTimeRef.current = Date.now();
-        }
         const { content } = event.data as { content: string };
         thinkingContentRef.current += content;
-        updateAssistantMessage({ thinking: thinkingContentRef.current });
+        if (!replaying) {
+          if (thinkingStartTimeRef.current === null) {
+            thinkingStartTimeRef.current = Date.now();
+          }
+          updateAssistantMessage({ thinking: thinkingContentRef.current });
+        }
         break;
       }
 
       case "thinking.done": {
         const { content } = event.data as { content: string };
-        if (content) {
-          thinkingContentRef.current = content;
-        }
+        if (content) thinkingContentRef.current = content;
         thinkingDoneRef.current = true;
-        if (thinkingStartTimeRef.current !== null) {
-          thinkingDurationRef.current = Math.round((Date.now() - thinkingStartTimeRef.current) / 1000);
+        if (!replaying) {
+          if (thinkingStartTimeRef.current !== null) {
+            thinkingDurationRef.current = Math.round((Date.now() - thinkingStartTimeRef.current) / 1000);
+          }
+          updateAssistantMessage({
+            thinking: thinkingContentRef.current,
+            thinkingDuration: thinkingDurationRef.current,
+          });
         }
-        updateAssistantMessage({
-          thinking: thinkingContentRef.current,
-          thinkingDuration: thinkingDurationRef.current,
-        });
         break;
       }
 
       case "text.delta": {
         const { content } = event.data as { content: string };
         assistantContentRef.current += content;
-        updateAssistantMessage({ content: assistantContentRef.current });
+        if (!replaying) {
+          updateAssistantMessage({ content: assistantContentRef.current });
+        }
         break;
       }
 
       case "text.done": {
         const { content } = event.data as { content: string };
-        if (content) {
-          assistantContentRef.current = content;
+        if (content) assistantContentRef.current = content;
+        if (!replaying) {
+          updateAssistantMessage({ content: assistantContentRef.current });
         }
-        updateAssistantMessage({ content: assistantContentRef.current });
         break;
       }
 
       case "run.completed": {
+        if (replaying) {
+          replayTerminalRef.current = event;
+          break;
+        }
         const { response } = event.data as { response: string };
         if (response && !assistantContentRef.current) {
           updateAssistantMessage({ content: response });
@@ -191,6 +201,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       }
 
       case "run.failed": {
+        if (replaying) {
+          replayTerminalRef.current = event;
+          break;
+        }
         const { error } = event.data as { error: string };
         const id = assistantIdRef.current;
         setMessages((prev) =>
@@ -214,18 +228,30 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
           args: Record<string, unknown>;
           message: string;
         };
-        setPendingConfirmations((prev) => [
-          ...prev,
-          { confirmationID, actionName, args, message, threadID: event.threadID },
-        ]);
+        if (replaying) {
+          replayConfirmationsRef.current.push({
+            confirmationID, actionName, args, message, threadID: event.threadID,
+          });
+        } else {
+          setPendingConfirmations((prev) => [
+            ...prev,
+            { confirmationID, actionName, args, message, threadID: event.threadID },
+          ]);
+        }
         break;
       }
 
       case "confirmation.resolved": {
         const { confirmationID } = event.data as { confirmationID: string };
-        setPendingConfirmations((prev) =>
-          prev.filter((c) => c.confirmationID !== confirmationID)
-        );
+        if (replaying) {
+          replayConfirmationsRef.current = replayConfirmationsRef.current.filter(
+            (c) => c.confirmationID !== confirmationID,
+          );
+        } else {
+          setPendingConfirmations((prev) =>
+            prev.filter((c) => c.confirmationID !== confirmationID)
+          );
+        }
         break;
       }
 
@@ -237,7 +263,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
           ...toolCallsRef.current,
           { toolCallID, toolName, args, status: "started" },
         ];
-        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        if (!replaying) {
+          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        }
         break;
       }
 
@@ -246,7 +274,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         toolCallsRef.current = toolCallsRef.current.map((tc) =>
           tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc
         );
-        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        if (!replaying) {
+          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        }
         break;
       }
 
@@ -257,7 +287,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         toolCallsRef.current = toolCallsRef.current.map((tc) =>
           tc.toolCallID === toolCallID ? { ...tc, status: "completed", result } : tc
         );
-        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        if (!replaying) {
+          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        }
         break;
       }
 
@@ -268,7 +300,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         toolCallsRef.current = toolCallsRef.current.map((tc) =>
           tc.toolCallID === toolCallID ? { ...tc, status: "failed", error } : tc
         );
-        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        if (!replaying) {
+          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        }
         break;
       }
 
@@ -287,7 +321,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
               }
             : tc
         );
-        updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        if (!replaying) {
+          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+        }
         break;
       }
 
@@ -302,103 +338,6 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         break;
     }
   }, [cleanup, updateAssistantMessage]);
-
-  const processReplayEvent = useCallback((event: AgentEvent) => {
-    switch (event.type) {
-      case "thinking.delta": {
-        const { content } = event.data as { content: string };
-        thinkingContentRef.current += content;
-        break;
-      }
-      case "thinking.done": {
-        const { content } = event.data as { content: string };
-        if (content) thinkingContentRef.current = content;
-        thinkingDoneRef.current = true;
-        break;
-      }
-      case "text.delta": {
-        const { content } = event.data as { content: string };
-        assistantContentRef.current += content;
-        break;
-      }
-      case "text.done": {
-        const { content } = event.data as { content: string };
-        if (content) assistantContentRef.current = content;
-        break;
-      }
-      case "confirmation.required": {
-        const { confirmationID, actionName, args, message } = event.data as {
-          confirmationID: string;
-          actionName: string;
-          args: Record<string, unknown>;
-          message: string;
-        };
-        replayConfirmationsRef.current.push({
-          confirmationID, actionName, args, message, threadID: event.threadID,
-        });
-        break;
-      }
-      case "confirmation.resolved": {
-        const { confirmationID } = event.data as { confirmationID: string };
-        replayConfirmationsRef.current = replayConfirmationsRef.current.filter(
-          (c) => c.confirmationID !== confirmationID,
-        );
-        break;
-      }
-      case "tool_call.started": {
-        const { toolCallID, toolName, args } = event.data as {
-          toolCallID: string; toolName: string; args: Record<string, unknown>;
-        };
-        toolCallsRef.current = [
-          ...toolCallsRef.current,
-          { toolCallID, toolName, args, status: "started" },
-        ];
-        break;
-      }
-      case "tool_call.executing": {
-        const { toolCallID } = event.data as { toolCallID: string };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc
-        );
-        break;
-      }
-      case "tool_call.result": {
-        const { toolCallID, result } = event.data as { toolCallID: string; result: unknown };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID ? { ...tc, status: "completed", result } : tc
-        );
-        break;
-      }
-      case "tool_call.error": {
-        const { toolCallID, error } = event.data as { toolCallID: string; error: string };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID ? { ...tc, status: "failed", error } : tc
-        );
-        break;
-      }
-      case "subagent.spawned": {
-        const { toolCallID, subagentRunID, subagentThreadID, agentID, goal } =
-          event.data as {
-            toolCallID: string; subagentRunID: string;
-            subagentThreadID: string; agentID: string; goal: string;
-          };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID
-            ? {
-                ...tc,
-                isSubagent: true,
-                subagentMeta: { runID: subagentRunID, threadID: subagentThreadID, agentID, goal },
-              }
-            : tc
-        );
-        break;
-      }
-      case "run.completed":
-      case "run.failed":
-        replayTerminalRef.current = event;
-        break;
-    }
-  }, []);
 
   const flushReplay = useCallback(() => {
     replayingRef.current = false;
@@ -421,7 +360,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     }
   }, [updateAssistantMessage, handleEvent]);
 
-  const subscribeToStream = useCallback((streamRunID: string, replay = false) => {
+  const subscribeToStream = useCallback((streamRunID: string) => {
     assistantIdRef.current = assistantIdRef.current || crypto.randomUUID();
     assistantContentRef.current = "";
     thinkingContentRef.current = "";
@@ -429,16 +368,13 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     thinkingStartTimeRef.current = null;
     thinkingDurationRef.current = undefined;
     toolCallsRef.current = [];
-    replayingRef.current = replay;
+    replayingRef.current = true;
     replayConfirmationsRef.current = [];
     replayTerminalRef.current = null;
 
     setIsLoading(true);
 
-    const url = replay
-      ? `${API_BASE}/stream/${streamRunID}?replay=true`
-      : `${API_BASE}/stream/${streamRunID}`;
-    const es = new EventSource(url);
+    const es = new EventSource(`${API_BASE}/stream/${streamRunID}`);
     eventSourceRef.current = es;
 
     es.onmessage = (event) => {
@@ -450,11 +386,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
           return;
         }
 
-        if (replayingRef.current) {
-          processReplayEvent(agentEvent);
-        } else {
-          handleEvent(agentEvent);
-        }
+        handleEvent(agentEvent);
       } catch {
         // Ignore malformed events
       }
@@ -467,7 +399,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       cleanup();
       setIsLoading(false);
     };
-  }, [handleEvent, processReplayEvent, flushReplay, cleanup]);
+  }, [handleEvent, flushReplay, cleanup]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim()) return;
@@ -563,7 +495,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         };
         setMessages((prev) => [...prev, placeholder]);
 
-        subscribeToStream(data.runID, true);
+        subscribeToStream(data.runID);
       })
       .catch(() => {});
 
