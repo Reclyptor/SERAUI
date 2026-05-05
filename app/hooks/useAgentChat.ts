@@ -146,6 +146,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
             thinkingStartTimeRef.current = Date.now();
           }
           updateAssistantMessage({ thinking: thinkingContentRef.current });
+        } else if (thinkingStartTimeRef.current === null) {
+          thinkingStartTimeRef.current = event.timestamp;
         }
         break;
       }
@@ -162,6 +164,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
             thinking: thinkingContentRef.current,
             thinkingDuration: thinkingDurationRef.current,
           });
+        } else if (thinkingStartTimeRef.current !== null) {
+          thinkingDurationRef.current = Math.round((event.timestamp - thinkingStartTimeRef.current) / 1000);
         }
         break;
       }
@@ -345,6 +349,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     updateAssistantMessage({
       content: assistantContentRef.current,
       thinking: thinkingContentRef.current || undefined,
+      thinkingDuration: thinkingDurationRef.current,
       toolCalls: toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
     });
 
@@ -360,7 +365,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     }
   }, [updateAssistantMessage, handleEvent]);
 
-  const subscribeToStream = useCallback((streamRunID: string) => {
+  const subscribeToStream = useCallback((streamRunID: string, replay = false) => {
     assistantIdRef.current = assistantIdRef.current || crypto.randomUUID();
     assistantContentRef.current = "";
     thinkingContentRef.current = "";
@@ -368,7 +373,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     thinkingStartTimeRef.current = null;
     thinkingDurationRef.current = undefined;
     toolCallsRef.current = [];
-    replayingRef.current = true;
+    replayingRef.current = replay;
     replayConfirmationsRef.current = [];
     replayTerminalRef.current = null;
 
@@ -495,7 +500,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
         };
         setMessages((prev) => [...prev, placeholder]);
 
-        subscribeToStream(data.runID);
+        subscribeToStream(data.runID, true);
       })
       .catch(() => {});
 
