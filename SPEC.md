@@ -465,7 +465,7 @@ interface ChatContextValue {
 ```
 
 Behavior:
-- On mount, calls `refreshChats()` (which invokes the `getChats` server action) and toggles `isLoading`.
+- On mount, `isLoading` starts as `true`; an effect schedules `refreshChats()` (which invokes the `getChats` server action) and clears `isLoading` after the initial refresh settles.
 - `sessionId` is initialized lazily via `useState(() => crypto.randomUUID())`. Clicking "New chat" calls `startNewChat()` to regenerate it, which forces `SeraChat` to remount and wipe its internal `useAgentChat` state.
 - Errors are surfaced as `"Failed to load chats"` and logged via `console.error`.
 
@@ -483,7 +483,7 @@ interface ImageCacheContextType {
 }
 ```
 
-Storage is a `Map<string, CachedImage>` held in `useState`. `clearOldImages()` is a memory ceiling, not a TTL — when the map exceeds 50 entries it slices to the most recent 50 by insertion order (via `Array.from(images.entries()).slice(-50)`). Throws if used outside the provider.
+Storage is a `Map<string, CachedImage>` held in `useState`. `clearOldImages()` is a memory ceiling, not a TTL — it uses a functional state update and, when the latest map exceeds 50 entries, slices to the most recent 50 by insertion order (via `Array.from(prev.entries()).slice(-50)`). Throws if used outside the provider.
 
 Consumers: `ImageUploadInput` (writes on send, calls `clearOldImages` after batch upload) and `ChatMessage` user variant (reads when rendering `[IMG:<id>]` markers).
 
@@ -740,7 +740,7 @@ Streaming behavior:
 
 Collapse behavior:
 
-- Thinking panel auto-collapses when `thinkingDuration` is set AND this message is not the latest assistant (`isLatest`). A user toggle (`userToggledRef`) sticks past auto-collapse.
+- Thinking panel auto-collapses when `thinkingDuration` is set AND this message is not the latest assistant (`isLatest`). A user toggle stores a manual collapse override that takes precedence over derived auto-collapse.
 - Label: `Thought for {n}s` when complete, `Thinking...` (animate-pulse) while streaming.
 - If there is no thinking and no content yet but the run is loading, renders a single `Thinking...` placeholder.
 
@@ -754,7 +754,7 @@ Renders a tool call as a single-line summary with an expandable detail strip. St
 | `completed` | Static muted dot; left border muted.                                |
 | `failed`    | Static muted dot; red `failed` chip after the tool name.            |
 
-Auto-collapses when complete unless this message is the latest. `userToggledRef` overrides auto-collapse after manual toggle.
+Auto-collapses when complete unless this message is the latest. A manual collapse override takes precedence after the user toggles the detail strip.
 
 Args/result/error formatting:
 - Single-key args under 120 chars render as `key: value`.
@@ -784,7 +784,7 @@ The "live" input bar. Props:
 ```ts
 {
   inProgress: boolean;
-  onSend: (text: string) => Promise<any>;
+  onSend: (text: string) => Promise<void>;
   onStop?: () => void;
   queue: string[];
   onDismissFromQueue: (index: number) => void;

@@ -14,7 +14,9 @@ function useCharStream(
   const indexRef = useRef(flushed ? target.length : 0);
   const rafRef = useRef<number>(0);
 
-  targetRef.current = target;
+  useEffect(() => {
+    targetRef.current = target;
+  }, [target]);
 
   useEffect(() => {
     if (flushed) {
@@ -62,7 +64,9 @@ function useProgressiveReveal(content: string, streaming: boolean): string {
   const lastTimeRef = useRef(0);
   const [display, setDisplay] = useState(streaming ? "" : content);
 
-  targetRef.current = content;
+  useEffect(() => {
+    targetRef.current = content;
+  }, [content]);
 
   useEffect(() => {
     if (!streaming) {
@@ -130,27 +134,14 @@ export function ThinkingMessage({
 
   const isThinkingComplete = thinkingDuration != null;
   const displayContent = useProgressiveReveal(content, !!isLoading);
-
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    if (!isThinkingComplete) return false;
-    return !isLatest;
-  });
+  const autoCollapsed = isThinkingComplete && !isLatest;
+  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+  const isCollapsed = manualCollapsed ?? autoCollapsed;
   const responseComplete = !isLoading;
-  const userToggledRef = useRef(false);
 
   const handleToggle = useCallback(() => {
-    userToggledRef.current = true;
-    setIsCollapsed((prev) => !prev);
-  }, []);
-
-  useEffect(() => {
-    if (userToggledRef.current) return;
-    if (!isThinkingComplete) return;
-
-    if (!isLatest) {
-      setIsCollapsed(true);
-    }
-  }, [isThinkingComplete, isLatest]);
+    setManualCollapsed((current) => !(current ?? autoCollapsed));
+  }, [autoCollapsed]);
 
   useCharStream(thinking ?? "", isThinkingComplete, thinkingTextRef, scrollRef);
 

@@ -123,7 +123,7 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Desktop sidebar - fixed at lg and above */}
+      {/* Desktop sidebar - inline at lg and above */}
       <aside
         className="hidden lg:flex flex-col h-screen bg-background-secondary overflow-hidden shrink-0"
         style={sidebarStyle}
@@ -139,7 +139,7 @@ export function Sidebar() {
         />
       </aside>
 
-      {/* Mobile sidebar - sticky below lg */}
+      {/* Mobile sidebar - fixed below lg */}
       <aside
         className="lg:hidden fixed left-0 top-0 z-40 flex flex-col h-screen bg-background-secondary overflow-hidden"
         style={sidebarStyle}
@@ -180,10 +180,10 @@ function SidebarContent({
   const { formatted: sessionTimeLeft } = useSessionTimer(expiresAt);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close the menu when the sidebar collapses
-  useEffect(() => {
-    if (isCollapsed) setIsUserMenuOpen(false);
-  }, [isCollapsed]);
+  const collapseSidebar = () => {
+    setIsUserMenuOpen(false);
+    setIsCollapsed(true);
+  };
 
   // Close the menu when clicking outside
   useEffect(() => {
@@ -226,7 +226,7 @@ function SidebarContent({
         )}
         {!isCollapsed && (
           <button
-            onClick={() => setIsCollapsed(true)}
+            onClick={collapseSidebar}
             className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
             title="Collapse sidebar"
           >

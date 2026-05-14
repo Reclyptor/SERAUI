@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { ChevronIcon, AgentIcon } from "../Icons";
 import type { ToolCallBlock } from "@/app/actions/chat";
 
@@ -13,22 +13,13 @@ export function SubagentMessage({ toolCall, isLatest }: SubagentMessageProps) {
   const isActive = toolCall.status === "started" || toolCall.status === "executing";
   const isDone = toolCall.status === "completed" || toolCall.status === "failed";
 
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    if (!isDone) return false;
-    return !isLatest;
-  });
-  const userToggledRef = useRef(false);
+  const autoCollapsed = isDone && !isLatest;
+  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+  const isCollapsed = manualCollapsed ?? autoCollapsed;
 
   const handleToggle = useCallback(() => {
-    userToggledRef.current = true;
-    setIsCollapsed((prev) => !prev);
-  }, []);
-
-  useEffect(() => {
-    if (userToggledRef.current) return;
-    if (!isDone) return;
-    if (!isLatest) setIsCollapsed(true);
-  }, [isDone, isLatest]);
+    setManualCollapsed((current) => !(current ?? autoCollapsed));
+  }, [autoCollapsed]);
 
   const meta = toolCall.subagentMeta;
   const label = meta?.agentID || "Subagent";
@@ -47,10 +38,14 @@ export function SubagentMessage({ toolCall, isLatest }: SubagentMessageProps) {
           {label}
         </span>
         {toolCall.status === "failed" && (
-          <span className="text-red-400 ml-1">failed</span>
+          <span className="ml-1 rounded-full bg-red-500/10 px-1.5 py-px text-[10px] text-red-400">
+            failed
+          </span>
         )}
         {toolCall.status === "completed" && (
-          <span className="text-foreground-muted/40 ml-1">done</span>
+          <span className="ml-1 rounded-full bg-foreground-muted/10 px-1.5 py-px text-[10px] text-foreground-muted/60">
+            done
+          </span>
         )}
       </button>
 

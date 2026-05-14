@@ -33,11 +33,12 @@ export function ImageCacheProvider({ children }: { children: ReactNode }) {
 
   const clearOldImages = () => {
     // Keep only last 50 images to prevent memory leak
-    if (images.size > 50) {
-      const entries = Array.from(images.entries());
+    setImages((prev) => {
+      if (prev.size <= 50) return prev;
+      const entries = Array.from(prev.entries());
       const toKeep = entries.slice(-50);
-      setImages(new Map(toKeep));
-    }
+      return new Map(toKeep);
+    });
   };
 
   return (

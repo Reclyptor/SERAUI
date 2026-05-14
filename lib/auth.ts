@@ -35,6 +35,11 @@ interface RefreshResult {
   expiresAt: number;
 }
 
+interface RefreshableToken {
+  refreshToken?: string;
+  [key: string]: unknown;
+}
+
 let cachedRefresh: RefreshResult | null = null;
 let inflightRefresh: Promise<RefreshResult> | null = null;
 
@@ -44,11 +49,16 @@ function getValidCache(): typeof cachedRefresh {
   return cachedRefresh;
 }
 
-async function refreshAccessToken(token: any) {
+async function refreshAccessToken<T extends RefreshableToken>(token: T) {
   const cached = getValidCache();
   if (cached) {
     return { ...token, ...cached };
   }
+
+  if (!token.refreshToken) {
+    throw new Error("Missing refresh token");
+  }
+  const refreshToken = token.refreshToken;
 
   if (inflightRefresh) {
     try {
@@ -71,7 +81,7 @@ async function refreshAccessToken(token: any) {
         client_id: process.env.AUTHENTIK_CLIENT_ID!,
         client_secret: process.env.AUTHENTIK_CLIENT_SECRET!,
         grant_type: "refresh_token",
-        refresh_token: token.refreshToken,
+        refresh_token: refreshToken,
       }),
     });
 

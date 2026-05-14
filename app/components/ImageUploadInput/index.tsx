@@ -10,7 +10,7 @@ import { uploadImage as uploadImageAction } from "@/app/actions/chat";
 
 interface ImageUploadInputProps {
   inProgress: boolean;
-  onSend: (text: string) => Promise<any>;
+  onSend: (text: string) => Promise<void>;
   onStop?: () => void;
   queue: string[];
   onDismissFromQueue: (index: number) => void;

@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 
-// Derive base URL from the CopilotKit runtime URL (strip /copilotkit suffix)
+// Direct server-to-server base URL for the SERA API.
 const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
 const API_PREFIX = "/api/v1";
 

@@ -14,26 +14,24 @@ function formatTimeLeft(seconds: number): string {
 }
 
 export function useSessionTimer(expiresAt: number | null) {
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
-    if (!expiresAt) return null;
-    return Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
-  });
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
 
   useEffect(() => {
-    if (!expiresAt) {
-      setSecondsLeft(null);
-      return;
-    }
+    if (expiresAt === null) return;
 
     const update = () => {
-      setSecondsLeft(Math.max(0, expiresAt - Math.floor(Date.now() / 1000)));
+      setNow(Math.floor(Date.now() / 1000));
     };
 
-    update();
+    const timeout = window.setTimeout(update, 0);
     const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      window.clearTimeout(timeout);
+      clearInterval(interval);
+    };
   }, [expiresAt]);
 
+  const secondsLeft = expiresAt !== null ? Math.max(0, expiresAt - now) : null;
   const formatted = secondsLeft !== null ? formatTimeLeft(secondsLeft) : null;
 
   return { secondsLeft, formatted };

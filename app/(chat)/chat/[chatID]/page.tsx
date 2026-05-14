@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getChat } from "@/app/actions/chat";
+import { getChat, type Chat } from "@/app/actions/chat";
 import { ChatContainer } from "../../../components/ChatContainer";
 
 export default async function ChatPage({
@@ -8,17 +8,19 @@ export default async function ChatPage({
   params: Promise<{ chatID: string }>;
 }) {
   const { chatID } = await params;
+  let chat: Chat;
 
   try {
-    const chat = await getChat(chatID);
-    return (
-      <ChatContainer
-        chatID={chat._id}
-        initialMessages={chat.messages}
-        initialModel={chat.model}
-      />
-    );
+    chat = await getChat(chatID);
   } catch {
     redirect("/new");
   }
+
+  return (
+    <ChatContainer
+      chatID={chat._id}
+      initialMessages={chat.messages}
+      initialModel={chat.model}
+    />
+  );
 }

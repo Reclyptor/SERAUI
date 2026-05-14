@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { ChevronIcon, DotIcon } from "../Icons";
 import type { ToolCallBlock } from "@/app/actions/chat";
 
@@ -30,22 +30,13 @@ export function ToolCallMessage({ toolCall, isLatest }: ToolCallMessageProps) {
   const isActive = toolCall.status === "started" || toolCall.status === "executing";
   const isDone = toolCall.status === "completed" || toolCall.status === "failed";
 
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    if (!isDone) return false;
-    return !isLatest;
-  });
-  const userToggledRef = useRef(false);
+  const autoCollapsed = isDone && !isLatest;
+  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+  const isCollapsed = manualCollapsed ?? autoCollapsed;
 
   const handleToggle = useCallback(() => {
-    userToggledRef.current = true;
-    setIsCollapsed((prev) => !prev);
-  }, []);
-
-  useEffect(() => {
-    if (userToggledRef.current) return;
-    if (!isDone) return;
-    if (!isLatest) setIsCollapsed(true);
-  }, [isDone, isLatest]);
+    setManualCollapsed((current) => !(current ?? autoCollapsed));
+  }, [autoCollapsed]);
 
   const argsStr = formatArgs(toolCall.args);
   const resultStr = toolCall.result != null ? formatResult(toolCall.result) : null;
@@ -64,7 +55,9 @@ export function ToolCallMessage({ toolCall, isLatest }: ToolCallMessageProps) {
           {toolCall.toolName}
         </span>
         {toolCall.status === "failed" && (
-          <span className="text-red-400 ml-1">failed</span>
+          <span className="ml-1 rounded-full bg-red-500/10 px-1.5 py-px text-[10px] text-red-400">
+            failed
+          </span>
         )}
       </button>
 

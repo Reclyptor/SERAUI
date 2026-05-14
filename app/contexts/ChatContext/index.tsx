@@ -43,8 +43,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    setIsLoading(true);
-    refreshChats().finally(() => setIsLoading(false));
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      refreshChats().finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
   }, [refreshChats]);
 
   return (
