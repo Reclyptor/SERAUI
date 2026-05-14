@@ -1,0 +1,1061 @@
+# SERAUI Application Specification
+
+> **Version:** 1.0
+> **Last Updated:** 2026-05-14
+> **Source of Truth** for routing, authentication, state management, streaming, and component behavior.
+
+---
+
+## Table of Contents
+
+1. [System Overview](#1-system-overview)
+2. [Environment & Configuration](#2-environment--configuration)
+3. [Routing & Navigation](#3-routing--navigation)
+4. [Authentication](#4-authentication)
+5. [Backend Proxy](#5-backend-proxy)
+6. [Server Actions](#6-server-actions)
+7. [Provider Tree](#7-provider-tree)
+8. [Contexts](#8-contexts)
+9. [Hooks](#9-hooks)
+10. [Streaming & Event Handling](#10-streaming--event-handling)
+11. [Component Catalog](#11-component-catalog)
+12. [Models](#12-models)
+13. [Image Handling](#13-image-handling)
+14. [Styling & Theming](#14-styling--theming)
+15. [Build & Deployment](#15-build--deployment)
+
+---
+
+## 1. System Overview
+
+SERAUI is the Next.js frontend for the SERA agentic AI platform. It renders the chat interface, manages user authentication against Authentik (OIDC), proxies agent API calls to the SERA backend, and consumes server-sent agent events to render thinking, text, tool calls, subagents, and confirmation prompts in real time.
+
+| Component  | Framework          | Role                       |
+| ---------- | ------------------ | -------------------------- |
+| **SERA**   | NestJS (Node.js)   | Backend API server         |
+| **SERAUI** (this spec) | Next.js | Frontend web application   |
+| **SERAEX** | Temporal (Node.js) | Background workflow worker |
+
+### Runtime
+
+- **Language:** TypeScript (target ES2017, module ESNext, JSX react-jsx, bundler resolution, `strict: true`)
+- **Framework:** Next.js 16.1 (App Router)
+- **UI Library:** React 19.2
+- **Auth:** `next-auth` v5 beta (Auth.js) with Authentik OIDC provider
+- **Styling:** Tailwind CSS v4 (`@tailwindcss/postcss`), `@tailwindcss/typography`, custom theme via `@theme inline`
+- **Markdown:** `react-markdown` with `remark-gfm`, `remark-breaks`, and `rehype-highlight` (`github-dark-dimmed` theme)
+- **Icons:** `lucide-react` plus a small in-house SVG icon set in `app/components/Icons`
+- **Class utility:** `clsx`
+- **Streaming:** Native `EventSource` (SSE) for agent events
+- **Build output:** `output: "standalone"` (Docker-friendly self-contained server)
+- **Default port:** 3000
+
+### File Layout
+
+```
+/
++-- proxy.ts              # Next.js Proxy (formerly middleware) — protects routes, rewrites /api/v1/agent/* to SERA
++-- next.config.ts        # Next config (output: standalone)
++-- next-env.d.ts         # Next type references
++-- eslint.config.mjs     # Flat config: next core-web-vitals + next/typescript
++-- postcss.config.mjs    # @tailwindcss/postcss plugin
++-- tsconfig.json         # ES2017 target, bundler resolution, "@/*" path alias
++-- Dockerfile            # 3-stage build (deps -> builder -> production on node:22-alpine)
++-- lib/                  # Server-only library code outside the App Router tree
+|   +-- auth.ts           # NextAuth config + OIDC discovery cache + refresh cache
+|   +-- auth-actions.ts   # signInWithAuthentik / signOutUser server actions
+|   +-- next-auth.d.ts    # Module augmentation for Session / JWT types
++-- public/               # Static assets (sera.png, favicon, etc.)
++-- app/                  # Next.js App Router root
+    +-- layout.tsx        # Root HTML, fonts, theme color, top-level providers
+    +-- page.tsx          # `/` route: redirects to `/new`
+    +-- globals.css       # Tailwind import, theme tokens, scrollbar styles, keyframes
+    +-- favicon.ico
+    +-- api/
+    |   +-- auth/[...nextauth]/route.ts  # NextAuth GET/POST handlers
+    +-- health/
+    |   +-- route.ts                     # GET /health -> { status: "ok" }
+    +-- (chat)/                          # Route group — applies sidebar layout
+    |   +-- layout.tsx                   # Sidebar + main flex container
+    |   +-- new/page.tsx                 # Welcome view (no chatID)
+    |   +-- chat/[chatID]/page.tsx       # Existing chat (server-loaded)
+    |   +-- manage/page.tsx              # Tabbed Manage page (prompts | skills)
+    +-- actions/                         # Server actions ("use server")
+    |   +-- chat.ts                      # Chat CRUD + image upload
+    |   +-- prompts.ts                   # Prompt CRUD
+    |   +-- skills.ts                    # Skill CRUD
+    +-- providers/                       # React provider components
+    |   +-- SessionProvider/index.tsx    # Wraps next-auth/react SessionProvider
+    |   +-- AuthProvider/index.tsx       # Redirect on unauth / refresh error; mounts ImageCacheProvider
+    +-- contexts/                        # React contexts
+    |   +-- ChatContext/index.tsx        # Recent chats list, refreshChats, sessionId, startNewChat
+    |   +-- ImageCacheContext/index.tsx  # In-memory preview cache (max 50 entries)
+    +-- hooks/                           # Client hooks
+    |   +-- useAgentChat.ts              # Core streaming + state machine
+    |   +-- useSessionTimer.ts           # Live countdown to session expiry
+    |   +-- useUser.ts                   # Convenience wrapper over useSession()
+    +-- lib/                             # Client-safe shared library code
+    |   +-- models.ts                    # Model registry, defaults, grouping helpers
+    +-- components/                      # All UI components (each in `<Name>/index.tsx`)
+        +-- ChatContainer
+        +-- ChatMessage
+        +-- ConfirmationCard
+        +-- IconButton
+        +-- Icons
+        +-- ImageThumbnail
+        +-- ImageUploadInput
+        +-- Markdown
+        +-- ModelSelector
+        +-- PromptsPanel
+        +-- SeraChat
+        +-- Sidebar
+        +-- SkillsPanel
+        +-- SubagentMessage
+        +-- ThinkingMessage
+        +-- ToolCallMessage
+        +-- WelcomeView
+```
+
+### Path Alias
+
+`tsconfig.json` maps `@/*` to `./*` (repo root). Imports such as `@/lib/auth`, `@/app/actions/chat`, and `@/app/lib/models` are used throughout.
+
+---
+
+## 2. Environment & Configuration
+
+### Required Variables
+
+| Variable                 | Description                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`            | Secret used by Auth.js to sign/encrypt the session cookie (HKDF-derived A256CBC-HS512 by Auth.js) |
+| `AUTHENTIK_ISSUER`       | OIDC issuer URL (e.g., `https://auth.example.com/application/o/sera/`)                            |
+| `AUTHENTIK_CLIENT_ID`    | Authentik OIDC client ID                                                                          |
+| `AUTHENTIK_CLIENT_SECRET`| Authentik OIDC client secret                                                                      |
+| `SERA_API_URL`           | Base URL of the SERA backend (default `http://localhost:3001`)                                    |
+
+### Optional Variables
+
+| Variable                  | Default                 | Description                                                                  |
+| ------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PORT`                    | `3000`                  | Server listen port                                                           |
+| `AUTH_TRUST_HOST`         | _(unset)_               | Required behind a reverse proxy so Auth.js trusts forwarded host headers     |
+| `AUTH_URL`                | _(unset)_               | Canonical origin used to construct callback URLs                             |
+| `NEXT_TELEMETRY_DISABLED` | _(unset)_               | Set to `1`/`true` to opt out of Next.js telemetry                            |
+
+### Build-time Behavior
+
+The root layout (`app/layout.tsx`) declares `export const dynamic = "force-dynamic"`. This forces every page through dynamic rendering at runtime so that environment variables (`SERA_API_URL`, `AUTHENTIK_*`) are read on each request rather than baked into the static build.
+
+---
+
+## 3. Routing & Navigation
+
+SERAUI uses the App Router. All authenticated UI lives under the `(chat)` route group so the sidebar layout is shared.
+
+| Path                       | Source                                | Auth     | Notes                                                                       |
+| -------------------------- | ------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `/`                        | `app/page.tsx`                        | Required | Server component; calls `redirect("/new")`                                  |
+| `/new`                     | `app/(chat)/new/page.tsx`             | Required | Client component; mounts `<ChatContainer chatID={null} initialMessages={[]} />` |
+| `/chat/[chatID]`           | `app/(chat)/chat/[chatID]/page.tsx`   | Required | Server component; awaits `params`, server-fetches via `getChat`, redirects to `/new` on failure |
+| `/manage`                  | `app/(chat)/manage/page.tsx`          | Required | Client component; reads `?tab=` query (`prompts` \| `skills`), defaults to `prompts` |
+| `/api/auth/[...nextauth]`  | `app/api/auth/[...nextauth]/route.ts` | Public   | Re-exports `GET` and `POST` from `lib/auth` `handlers`                      |
+| `/health`                  | `app/health/route.ts`                 | Public   | `GET` only; returns `{ status: "ok" }` JSON                                 |
+
+### Route Group Layout
+
+`app/(chat)/layout.tsx` is a `"use client"` layout that renders:
+
+```tsx
+<div className="flex h-screen w-full bg-background">
+  <Sidebar />
+  <main className="flex-1 flex flex-col min-w-0 lg:ml-0 ml-[48px]">{children}</main>
+</div>
+```
+
+The `ml-[48px]` offset accommodates the mobile sidebar's collapsed footprint; at `lg` and above the sidebar sits inline and `ml-0` removes the offset.
+
+### Manage Tabs
+
+`/manage` renders a `<Suspense>` boundary (required because the page reads `useSearchParams`) around a tab strip that updates the URL via `router.replace`. Recognized tabs: `prompts` (default), `skills`. The active tab is computed as `(searchParams.get("tab") as Tab) ?? "prompts"`, which only handles the *missing* case — when the query param is absent, the panel falls back to `prompts`. The render is then `activeTab === "prompts" ? <PromptsPanel /> : <SkillsPanel />`, so any non-`"prompts"` value (including unrecognized strings) renders the skills panel.
+
+### Post-send Navigation
+
+When the user sends the first message on `/new`, the chat ID arrives on the SSE handshake (`POST /agent/chat` response). After the run completes, `SeraChat` rewrites the URL in place via `window.history.replaceState(null, "", `/chat/${activeChatID}`)` (no client navigation, no remount).
+
+---
+
+## 4. Authentication
+
+### Provider
+
+Single OIDC provider declared in `lib/auth.ts`:
+
+```ts
+{
+  id: "authentik",
+  name: "Authentik",
+  type: "oidc",
+  issuer: process.env.AUTHENTIK_ISSUER,
+  clientId: process.env.AUTHENTIK_CLIENT_ID,
+  clientSecret: process.env.AUTHENTIK_CLIENT_SECRET,
+  authorization: { params: { scope: "openid email profile offline_access" } },
+}
+```
+
+`offline_access` is requested so that Authentik returns a refresh token alongside the access token.
+
+### Session & JWT Shape
+
+Module augmentation in `lib/next-auth.d.ts`:
+
+```ts
+declare module "next-auth" {
+  interface Session {
+    user: { id?: string; name?: string | null; email?: string | null; image?: string | null };
+    error?: string;             // "RefreshError" when refresh fails
+    expiresAt?: number;         // Unix seconds when the access token expires
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;         // Unix seconds
+  }
+}
+```
+
+The access token is **not** sent to the client. It is stored inside the encrypted JWT session cookie and forwarded to SERA only via server-side cookie passthrough (see [Backend Proxy](#5-backend-proxy)).
+
+### JWT Callback
+
+On first sign-in, the `account` argument is populated. The callback clears any cached refresh and stores `accessToken`, `refreshToken`, and `expiresAt` on the JWT.
+
+On subsequent requests:
+- If `expiresAt * 1000 - 120_000 > Date.now()` (more than 2 minutes of life remaining), the token is returned unchanged.
+- Otherwise the callback invokes `refreshAccessToken(token)`. If refresh fails, `accessToken` and `refreshToken` are cleared. The session callback then sets `session.error = "RefreshError"` so the client can react.
+
+### Session Callback
+
+`session({ session, token })` sets:
+- `session.error = "RefreshError"` whenever `token.accessToken` is missing.
+- `session.expiresAt = token.expiresAt` so the UI can render a live countdown.
+
+### OIDC Discovery Cache
+
+`getTokenEndpoint()` caches `token_endpoint` from `${AUTHENTIK_ISSUER}/.well-known/openid-configuration` in module memory for 1 hour (`3_600_000` ms). Avoids a discovery round trip on every refresh.
+
+### Token Refresh Cache (Race-condition Guard)
+
+Authentik rotates refresh tokens on every use. To avoid double-refresh races when concurrent requests arrive with the same cookie, `lib/auth.ts` maintains two module-scoped variables:
+
+| Symbol             | Purpose                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `cachedRefresh`    | Most recent successful refresh result `{ accessToken, refreshToken, expiresAt }` |
+| `inflightRefresh`  | Promise of an in-progress refresh; awaited by concurrent callers     |
+
+`getValidCache()` returns the cached result only if `Date.now() / 1000 < cachedRefresh.expiresAt - 120` (still outside the 2-minute refresh window). If a concurrent refresh is in flight, callers await it; on failure they retry against any newly-cached result before throwing.
+
+### Sign-in / Sign-out
+
+`lib/auth-actions.ts` exposes two server actions:
+
+```ts
+"use server";
+export async function signInWithAuthentik() { await signIn("authentik"); }
+export async function signOutUser()        { await signOut(); }
+```
+
+The Sidebar invokes `signOut({ callbackUrl: "/api/auth/signin" })` from `next-auth/react` directly (client-side) rather than the server action, so the user is bounced through `/api/auth/signin` post-logout.
+
+### Client-side Reauth
+
+`AuthProvider` triggers a hard navigation to `/api/auth/signin` when either:
+- `useSession().status === "unauthenticated"`, or
+- `session.error === "RefreshError"`.
+
+A `useRef` guard (`reauthTriggered`) prevents the redirect from firing more than once per session. The component returns `null` while redirecting so child trees never see an unauthenticated state.
+
+### Periodic Session Refetch
+
+`SessionProvider` configures `next-auth/react`'s `SessionProvider` with:
+- `refetchInterval={2 * 60}` (120 seconds)
+- `refetchOnWindowFocus={true}`
+
+The 2-minute cadence pairs with the 2-minute pre-expiry refresh window in `lib/auth.ts` so the JWT callback rotates the access token before it actually expires. The comment in source explicitly avoids `update()` due to a known next-auth v5 bug that fires the JWT callback multiple times and breaks refresh-token rotation.
+
+---
+
+## 5. Backend Proxy
+
+`proxy.ts` at the repo root is the Next.js 16 proxy (the successor to `middleware.ts`). It wraps the matcher with the `auth()` higher-order function so that token refreshes written into the session cookie by the JWT callback land on the response.
+
+```ts
+export const proxy = auth((req) => {
+  const { pathname, search } = req.nextUrl;
+
+  if (pathname.startsWith("/api/v1/agent")) {
+    if (!req.auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.rewrite(new URL(`${SERA_API_URL}${pathname}${search}`));
+  }
+
+  if (!req.auth) return NextResponse.redirect(new URL("/api/auth/signin", req.url));
+
+  return NextResponse.next();
+});
+
+export const config = {
+  matcher: [
+    "/api/v1/agent/:path*",
+    "/((?!api/auth|_next/static|_next/image|favicon.ico|health).*)",
+  ],
+};
+```
+
+| Path Pattern                                | Behavior                                                                                  |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `/api/v1/agent/:path*`                      | Unauthenticated → 401 JSON; otherwise rewritten to `${SERA_API_URL}${pathname}${search}` |
+| `/api/auth/*`, `_next/static`, `_next/image`, `favicon.ico`, `/health` | Excluded — pass straight through to the framework or route handler                        |
+| Everything else                             | Unauthenticated → 302 to `/api/auth/signin`; authenticated → continue                     |
+
+### Why `auth()` Wraps the Proxy
+
+The leading comment in `proxy.ts` notes that calling `auth()` as a wrapper (rather than `await auth()` inside the function body) is mandatory: only the wrapper pattern ensures NextAuth writes the refreshed session cookie back onto the response. Without it, a refreshed token lives in server memory while the browser keeps the old cookie, producing `invalid_grant` on the next refresh attempt.
+
+### Cookie Passthrough
+
+When the proxy rewrites a request to `${SERA_API_URL}/...`, the original `Cookie` header travels with it. SERA's `SessionAuthGuard` decrypts the same session cookie (using the shared `AUTH_SECRET`), validates the embedded access token against Authentik's JWKS, and attaches the resulting `SessionUser` to its request.
+
+---
+
+## 6. Server Actions
+
+All server actions live under `app/actions/*` and start with `"use server"`. Each action:
+
+1. Reads `cookies()` and serializes every cookie into a `Cookie:` header.
+2. Throws `"Not authenticated"` if the cookie store is empty.
+3. Calls SERA at `${SERA_API_URL}${API_PREFIX}${path}` where `API_PREFIX = "/api/v1"`.
+4. Uses `cache: "no-store"` for GETs.
+5. Throws a generic `Failed to <verb> <resource>: ${response.statusText}` error on non-OK responses. **Exception:** `uploadImage` first attempts to parse the response body as JSON and prefers a `message` field if present, otherwise falls back to `"Failed to upload image"`.
+
+### 6.1 `app/actions/chat.ts`
+
+Types exported (also consumed by `useAgentChat` and message components):
+
+```ts
+interface SubagentMeta  { runID: string; threadID: string; agentID: string; goal: string; }
+interface ToolCallBlock {
+  toolCallID: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  status: "started" | "executing" | "completed" | "failed";
+  isSubagent?: boolean;
+  subagentMeta?: SubagentMeta;
+}
+interface Message {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  thinking?: string;
+  thinkingDuration?: number;
+  toolCalls?: ToolCallBlock[];
+  createdAt?: Date;
+}
+interface Chat         { _id: string; userID: string; title: string; model?: string; messages: Message[]; createdAt: string; updatedAt: string; }
+interface ChatListItem { _id: string; userID: string; title: string; model?: string; createdAt: string; updatedAt: string; }
+```
+
+| Action                                            | Method | SERA endpoint                          | Used by                                  |
+| ------------------------------------------------- | ------ | -------------------------------------- | ---------------------------------------- |
+| `getChats(): ChatListItem[]`                      | GET    | `/api/v1/chats`                        | `ChatContext.refreshChats`               |
+| `getChat(chatID): Chat`                           | GET    | `/api/v1/chats/:id`                    | `app/(chat)/chat/[chatID]/page.tsx`      |
+| `createChat(messages): Chat`                      | POST   | `/api/v1/chats`                        | _(currently unused by the UI; exported)_ |
+| `updateChat(chatID, messages): Chat`              | PATCH  | `/api/v1/chats/:id`                    | _(currently unused by the UI; exported)_ |
+| `deleteChat(chatID): void`                        | DELETE | `/api/v1/chats/:id`                    | _(currently unused by the UI; exported)_ |
+| `uploadImage(formData): { imageID: string }`      | POST   | `/api/v1/agent/upload-image`           | `ImageUploadInput`                       |
+
+Note: `uploadImage` is the **only** action that uses the `/agent/*` proxy namespace. It is invoked as a server action (cookie-forwarded), not via the proxy rewrite. The SERA response shape is documented as `{ imageID, mimeType }` server-side; the UI consumer reads only `imageID`.
+
+### 6.2 `app/actions/prompts.ts`
+
+```ts
+interface PromptListItem { slug: string; extends?: string; description?: string; metadata: Record<string, unknown>; createdAt: string; updatedAt: string; }
+interface PromptDetail   { slug: string; extends?: string; content: string; description?: string; metadata: Record<string, unknown>; }
+```
+
+| Action                                | Method | SERA endpoint                  | Used by         |
+| ------------------------------------- | ------ | ------------------------------ | --------------- |
+| `listPrompts(): PromptListItem[]`     | GET    | `/api/v1/prompts`              | `PromptsPanel`  |
+| `getPrompt(slug): PromptDetail`       | GET    | `/api/v1/prompts/:slug`        | `PromptsPanel`  |
+| `savePrompt(slug, data): PromptDetail`| PUT    | `/api/v1/prompts/:slug`        | `PromptsPanel`  |
+| `deletePrompt(slug): void`            | DELETE | `/api/v1/prompts/:slug`        | _(unused)_      |
+
+`savePrompt` body shape: `{ content: string; extends?: string; description?: string; metadata?: Record<string, unknown> }`. Slug is URL-encoded.
+
+### 6.3 `app/actions/skills.ts`
+
+```ts
+interface SkillListItem { name: string; description: string; status: "active" | "stale" | "archived"; allowedTools: string[]; lastUsedAt?: string; usageCount: number; createdAt: string; updatedAt: string; }
+interface SkillFile     { path: string; content: string; }
+interface SkillDetail   { name: string; description: string; content: string; license?: string; compatibility?: string; allowedTools: string[]; metadata: Record<string, string>; files: SkillFile[]; status: "active" | "stale" | "archived"; lastUsedAt?: string; usageCount: number; }
+```
+
+| Action                            | Method | SERA endpoint                | Used by      |
+| --------------------------------- | ------ | ---------------------------- | ------------ |
+| `listSkills(): SkillListItem[]`   | GET    | `/api/v1/skills`             | `SkillsPanel`|
+| `getSkill(name): SkillDetail`     | GET    | `/api/v1/skills/:name`       | `SkillsPanel`|
+| `saveSkill(name, data): SkillDetail` | PUT | `/api/v1/skills/:name`       | `SkillsPanel`|
+| `deleteSkill(name): void`         | DELETE | `/api/v1/skills/:name`       | _(unused)_   |
+
+`saveSkill` body shape: `{ content?: string; description?: string; allowedTools?: string[]; metadata?: Record<string, string> }`. Name is URL-encoded.
+
+---
+
+## 7. Provider Tree
+
+`app/layout.tsx` declares the global provider stack:
+
+```
+<html lang="en" class="dark">
+  <body class="${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground">
+    <SessionProvider>            # next-auth/react SessionProvider (refetchInterval: 120s)
+      <AuthProvider>             # Reauth guard + ImageCacheProvider
+        <ChatProvider>           # Recent chats + sessionId
+          {children}
+```
+
+Notable layout details:
+- The root `<html>` is hard-coded with `className="dark"`. There is no theme switcher.
+- `viewport.themeColor` is `#1a1915` (matches the dark background).
+- `metadata`: `{ title: "SERA", description: "AI Assistant" }`.
+- Geist Sans and Geist Mono are loaded via `next/font/google`, exposed as CSS custom properties `--font-geist-sans` and `--font-geist-mono`, and consumed by `globals.css` `@theme inline`.
+
+### 7.1 `SessionProvider`
+
+Thin wrapper around `next-auth/react`'s `SessionProvider`. Configures `refetchInterval={2 * 60}` and `refetchOnWindowFocus={true}`. The 2-minute interval is intentionally less than the access-token lifetime minus the 2-minute pre-expiry guard so the JWT callback triggers refresh in time. Uses GET-based refetch only (no `update()` calls) because of the documented v5 beta double-firing bug.
+
+### 7.2 `AuthProvider`
+
+Renders `null` while the redirect is in flight, otherwise renders its children inside `ImageCacheProvider`. Effects:
+
+1. **Reauth effect:** if `status === "unauthenticated"` or `session.error === "RefreshError"`, set `reauthTriggered.current = true` and call `window.location.replace("/api/auth/signin")`. Skipped while already on `/api/auth/*` to avoid loops.
+2. **Reset effect:** when `status === "authenticated"` and there is no refresh error, clear `reauthTriggered.current` so a future expiry can re-trigger.
+
+---
+
+## 8. Contexts
+
+### 8.1 `ChatContext` (`app/contexts/ChatContext/index.tsx`)
+
+Mounted at the root layout. Exposes:
+
+```ts
+interface ChatContextValue {
+  recentChats: ChatListItem[];
+  isLoading: boolean;
+  error: string | null;
+  refreshChats: () => Promise<void>;
+  sessionId: string;            // Randomized per "New chat" click; used as React `key`
+  startNewChat: () => void;     // Mints a fresh sessionId
+}
+```
+
+Behavior:
+- On mount, calls `refreshChats()` (which invokes the `getChats` server action) and toggles `isLoading`.
+- `sessionId` is initialized lazily via `useState(() => crypto.randomUUID())`. Clicking "New chat" calls `startNewChat()` to regenerate it, which forces `SeraChat` to remount and wipe its internal `useAgentChat` state.
+- Errors are surfaced as `"Failed to load chats"` and logged via `console.error`.
+
+Consumers: `ChatContainer`, `SeraChat`, `Sidebar`.
+
+### 8.2 `ImageCacheContext` (`app/contexts/ImageCacheContext/index.tsx`)
+
+Mounted inside `AuthProvider`. Exposes:
+
+```ts
+interface ImageCacheContextType {
+  addImage: (id: string, preview: string, mimeType: string) => void;
+  getImage: (id: string) => CachedImage | undefined;
+  clearOldImages: () => void;
+}
+```
+
+Storage is a `Map<string, CachedImage>` held in `useState`. `clearOldImages()` is a memory ceiling, not a TTL — when the map exceeds 50 entries it slices to the most recent 50 by insertion order (via `Array.from(images.entries()).slice(-50)`). Throws if used outside the provider.
+
+Consumers: `ImageUploadInput` (writes on send, calls `clearOldImages` after batch upload) and `ChatMessage` user variant (reads when rendering `[IMG:<id>]` markers).
+
+---
+
+## 9. Hooks
+
+### 9.1 `useUser` (`app/hooks/useUser.ts`)
+
+Wraps `next-auth/react`'s `useSession()`. Returns:
+
+```ts
+{
+  user,                  // session.user object (or undefined)
+  name: string,          // user.name ?? "User"
+  email: string | null,  // user.email ?? null
+  image: string | null,  // user.image ?? null
+  initials: string,      // First letter of first + last whitespace-split name parts, uppercased; "?" if no name
+  isLoading: boolean,    // status === "loading"
+  isAuthenticated: boolean, // status === "authenticated"
+  expiresAt: number | null, // Forwarded from session.expiresAt
+}
+```
+
+`getInitials` collapses on internal whitespace and returns a single character if only one name part is present.
+
+### 9.2 `useSessionTimer(expiresAt: number | null)`
+
+Maintains a live `secondsLeft` countdown derived from `expiresAt - Math.floor(Date.now() / 1000)`. Returns `{ secondsLeft, formatted }`:
+
+- `formatTimeLeft(seconds)` formats `H:MM:SS` if `seconds >= 3600`, else `M:SS`. Clamps to `0:00` on non-positive input.
+- Cleared (`null`) when `expiresAt` is null. Updated on a 1-second interval; the interval is cleared on unmount or `expiresAt` change.
+
+Consumer: `Sidebar` (renders next to the Log out button).
+
+### 9.3 `useAgentChat` (`app/hooks/useAgentChat.ts`)
+
+The streaming state machine for a single chat. **The single largest module in the UI.**
+
+```ts
+interface UseAgentChatOptions {
+  initialMessages?: Message[];
+  chatID?: string | null;
+  threadID?: string;
+  initialModel?: string;
+}
+
+interface UseAgentChatReturn {
+  messages: Message[];
+  isLoading: boolean;
+  chatID: string | null;
+  threadID: string | null;
+  runID: string | null;
+  model: string | null;
+  setModel: (model: string) => void;
+  sendMessage: (content: string) => Promise<void>;
+  stopGeneration: () => void;
+  setMessages: (messages: Message[]) => void;
+  queue: string[];                                   // Pending user messages (sent while a run is active)
+  dismissFromQueue: (index: number) => void;
+  pendingConfirmations: PendingConfirmation[];
+  resolveConfirmation: (confirmationID: string, approved: boolean, feedback?: string) => Promise<void>;
+}
+
+interface PendingConfirmation {
+  confirmationID: string;
+  actionName: string;
+  args: Record<string, unknown>;
+  message: string;
+  threadID: string;
+}
+```
+
+Constants:
+- `API_BASE = "/api/v1/agent"` — every request is routed through the proxy to SERA.
+
+#### State Initialization
+
+- `model` is seeded from `options.initialModel` if provided. Otherwise an effect reads `localStorage["sera:lastModel"]` and adopts it if the model id is still in the registry; otherwise the stored value is removed and `model` stays `null`.
+- `setModel(value)` writes through to `localStorage["sera:lastModel"]`.
+
+#### Chat-switch Reset
+
+A `prevChatIDRef` tracks the last seen `options.chatID`. When it changes, the hook:
+1. Closes any open `EventSource` and abort controller.
+2. Resets `messages` to `options.initialMessages ?? []`.
+3. Resets `chatID`, `threadID`, `runID`, `isLoading`, `queue`, `pendingConfirmations`.
+4. Clears `sendingRef` and `reconnectingRef`.
+5. If `options.initialModel` is now set, adopts it.
+
+This effect is what makes navigation from `/chat/A` → `/chat/B` cleanly load B's history.
+
+#### Send Flow
+
+1. If content is empty, return.
+2. If a send is already in flight (`sendingRef.current`), push onto `queue` and return.
+3. Mark sending, append a user message, set `isLoading = true`.
+4. `POST ${API_BASE}/chat` with body `{ message, chatID?, threadID?, model? }`.
+5. Read `{ runID, threadID, chatID }` from the JSON response. Store all three.
+6. Append a blank assistant message with a new id (`crypto.randomUUID()`).
+7. Call `subscribeToStream(newRunID)`.
+
+On `AbortError`, the catch path silently returns. Any other error logs and resets `isLoading`.
+
+#### Stream Subscription
+
+`subscribeToStream(streamRunID, replay = false)` clears all stream refs (`assistantContentRef`, `thinkingContentRef`, `toolCallsRef`, etc.), opens `new EventSource(${API_BASE}/stream/${streamRunID})`, and routes events:
+
+- `replay.done` triggers `flushReplay()`.
+- All other events are dispatched through `handleEvent(agentEvent)`.
+
+`onerror` clears all in-flight flags and `isLoading`. Malformed JSON is silently ignored.
+
+#### Replay vs. Live Mode
+
+`replayingRef.current` distinguishes a fresh run (`false`) from a reconnect-during-stream replay (`true`).
+
+- In **live mode**, every event mutates `messages` via `updateAssistantMessage` immediately.
+- In **replay mode**, events accumulate into refs (`assistantContentRef`, `thinkingContentRef`, `toolCallsRef`, `replayConfirmationsRef`, `replayTerminalRef`) without touching React state. The single `flushReplay()` call applies the accumulated snapshot in one batch, then forwards any captured terminal event (`run.completed` / `run.failed`) to `handleEvent`.
+
+This keeps the screen from flickering while SSE replays the entire run history on reconnect.
+
+#### Reconnect-on-Mount
+
+When the hook mounts with `options.chatID` set and is not currently sending or reconnecting:
+
+1. `GET ${API_BASE}/active-run/${options.chatID}` (SERA returns `{ runID, threadID }` if a run is still active, or 404).
+2. If a run is found and the request was not cancelled mid-flight: set `reconnectingRef = true`, set `runID`/`threadID`, append a blank assistant placeholder, and call `subscribeToStream(runID, true)`.
+
+#### Confirmations
+
+`resolveConfirmation(confirmationID, approved, feedback?)` POSTs to `${API_BASE}/confirm/${threadID}/${confirmationID}` with `{ approved, feedback }`. On `res.ok`, the matching entry is removed from `pendingConfirmations`. (The server is also expected to broadcast a `confirmation.resolved` event, which the event handler dedupes against.)
+
+#### Queue Drain
+
+An effect monitors `!isLoading && queue.length > 0 && !sendingRef.current`. It shifts the head of the queue and re-invokes `sendMessage(next)`. `dismissFromQueue(index)` removes a single entry by index.
+
+#### Stop Generation
+
+`stopGeneration()` issues `POST ${API_BASE}/cancel/${runID}` (fire-and-forget, `.catch(() => {})`), clears `sendingRef`, closes the EventSource via `cleanup()`, and sets `isLoading = false`. The SSE is closed synchronously by the UI, so the UI does not wait for a terminal event from SERA — any subsequent backend events are dropped. SERA marks the run as `cancelled` server-side (see SERA SPEC §6 Cancellation).
+
+---
+
+## 10. Streaming & Event Handling
+
+### 10.1 Event Envelope
+
+Events arriving over SSE are JSON strings parsed into:
+
+```ts
+interface AgentEvent {
+  type: string;
+  runID: string;
+  threadID: string;
+  timestamp: number;
+  data: unknown;
+}
+```
+
+(See SERA SPEC §8 for the canonical envelope shape — `streamID` is sent by SERA but not consumed by the UI.)
+
+### 10.2 Handled Event Types
+
+| Event                  | Replay-aware  | UI effect (live mode)                                                                                  |
+| ---------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `thinking.delta`       | Yes           | Appends to `thinking` on the assistant message; starts the thinking timer on first delta.              |
+| `thinking.done`        | Yes           | Replaces `thinking` with final content (if non-empty), sets `thinkingDuration` in seconds.             |
+| `text.delta`           | Yes           | Appends to assistant `content`.                                                                        |
+| `text.done`            | Yes           | Replaces assistant `content` with final string if non-empty.                                           |
+| `run.completed`        | Captured for replay flush | Backfills `content` from `data.response` if streaming missed it; clears `isLoading`; closes SSE.       |
+| `run.failed`           | Captured for replay flush | If the assistant has no content, writes `Error: <error>` as the content; clears `isLoading`; closes.   |
+| `confirmation.required`| Yes           | Pushes onto `pendingConfirmations` (or `replayConfirmationsRef` during replay).                        |
+| `confirmation.resolved`| Yes           | Removes the matching confirmation entry.                                                               |
+| `tool_call.started`    | Yes           | Appends a `ToolCallBlock { status: "started" }` to the assistant's `toolCalls`.                        |
+| `tool_call.executing`  | Yes           | Flips that tool call's `status` to `"executing"`.                                                       |
+| `tool_call.result`     | Yes           | Sets `status: "completed"` and stores `result`.                                                         |
+| `tool_call.error`      | Yes           | Sets `status: "failed"` and stores `error`.                                                             |
+| `subagent.spawned`     | Yes           | Marks the matching tool call `isSubagent: true` and attaches `subagentMeta`.                            |
+| `replay.done`          | N/A           | Triggers `flushReplay()`.                                                                              |
+
+The hook explicitly receives but ignores: `subagent.completed`, `subagent.failed`, `plan.created`, `plan.step_updated`, `evaluation.done`, `error`. These events are still recorded by SERA and may be consumed in a future UI revision.
+
+### 10.3 Thinking Duration
+
+`thinking.delta` starts a wall-clock timer on the first delta. On `thinking.done` the hook computes `Math.round((Date.now() - thinkingStartTime) / 1000)` (live mode) or `Math.round((event.timestamp - thinkingStartTime) / 1000)` (replay mode) and stores it as `thinkingDuration`. `ThinkingMessage` formats it as `Thought for {duration}s`.
+
+### 10.4 Assistant Message Identity
+
+A fresh `assistantIdRef.current = crypto.randomUUID()` is generated:
+- Before appending the blank assistant message in `sendMessage`.
+- Before appending the placeholder during reconnect.
+
+`updateAssistantMessage(patch)` matches by this id, leaving all other messages unchanged.
+
+---
+
+## 11. Component Catalog
+
+Each component lives at `app/components/<Name>/index.tsx`. All are client components unless noted; SSR is not used for any UI component (chat pages do SSR data fetch in their route file, then mount the client tree).
+
+### 11.1 `ChatContainer`
+
+Pass-through wrapper. Pulls `sessionId` from `ChatContext` and uses it as the `key` for `<SeraChat>`, which forces a full remount when "New chat" is clicked from the sidebar.
+
+Props: `{ chatID: string | null; initialMessages: Message[]; initialModel?: string }`.
+
+Holds an `appendMessageRef` (currently unused by siblings; declared for future inter-component messaging).
+
+### 11.2 `SeraChat`
+
+The chat surface. Wires `useAgentChat` to the message list, input, confirmations, and queue chips.
+
+Props: `{ chatID, initialMessages, initialModel?, appendMessageRef? }`.
+
+Behaviors:
+- **Empty `/new` state:** renders `<WelcomeView>` only when `chatID === null && messages.length === 0`. When the first user message is sent, the empty state is replaced by the normal scroll-view because `messages` is no longer empty.
+- **Pending indicator:** if the run is loading and the last message is the user's, renders an extra blank assistant `<ChatMessage>` with `isLoading=true` to show a "Thinking…" stub before the assistant streams in.
+- **Latest-assistant marker:** computes `lastAssistantIndex` via `findLastIndex` so `ChatMessage` can pass `isLatestAssistant` only to the bottom-most assistant message. This drives auto-collapsing of historical thinking/tool blocks.
+- **URL rewrite + sidebar refresh:** a `prevLoadingRef` detects the `true → false` transition. On completion, if the page was originally `/new` (`!chatID`), the run yielded an `activeChatID`, and `hasNavigatedRef.current` is still false, the URL is updated via `window.history.replaceState(null, "", `/chat/${activeChatID}`)` (no navigation) and `hasNavigatedRef.current` is set so the rewrite fires exactly once. Either way, `refreshChats()` is invoked so the sidebar's recents update.
+- **Announcements:** `appendMessageRef.current` is exposed as a function that pushes onto a local `announcements` array. The chat view renders announcements after the regular message list. (No consumer wires `appendMessageRef` today, but the wiring is in place.)
+- **Auto-scroll:** a `scrollRef` is set to `scrollHeight` on every `messages`, `isLoading`, or `pendingConfirmations` change.
+
+### 11.3 `ChatMessage`
+
+Routes by lowercased role:
+
+- `user` → `UserMessage`
+- `assistant` → `AssistantMessage`
+- anything else → `null` (system messages are not rendered)
+
+#### `UserMessage`
+
+- Extracts image markers from `content` using `/\[IMG:([a-f0-9-]+)\]/g`. The regex requires lowercase hex (the IDs minted by SERA are lowercased UUIDs).
+- Renders an `<ImageThumbnail size="lg">` for each cached image and the cleaned text inside a right-aligned bubble.
+- Reads previews from `ImageCacheContext.getImage`. If a marker has no cached preview (e.g., new tab, page refresh), the thumbnail is omitted; the text fallback `cleanText` still renders.
+
+#### `AssistantMessage`
+
+Hands content + thinking + tool calls to `<ThinkingMessage>`. Renders `<ToolCallMessage>` for normal tool calls and `<SubagentMessage>` for tool calls flagged `isSubagent`.
+
+### 11.4 `ThinkingMessage`
+
+Renders three things in document order:
+
+1. A collapsible thinking panel.
+2. Any `children` (the tool-call block).
+3. The assistant's main response (`Markdown`).
+
+Streaming behavior:
+
+- **`useCharStream`** — drives the thinking panel. While thinking is in progress, a `requestAnimationFrame` loop appends one character per frame to a `<span>` via `node.textContent` (avoiding React re-renders for every keystroke). When `thinkingDuration` becomes defined, the full string is written in one shot.
+- **`useProgressiveReveal`** — drives the response text. While `isLoading` is `true`, reveals characters in chunks sized `Math.max(1, Math.ceil(behind / 6))` no faster than every 30 ms. When loading ends, it snaps to the full content.
+- **Streaming caret** — when streaming, an inline `<style>` injects CSS that appends a pulsing `▎` block to the last leaf in the rendered Markdown (paragraphs, lists, blockquotes, code blocks, table cells). Animation: `pulse 0.8s steps(1) infinite`, color `var(--color-accent)`.
+
+Collapse behavior:
+
+- Thinking panel auto-collapses when `thinkingDuration` is set AND this message is not the latest assistant (`isLatest`). A user toggle (`userToggledRef`) sticks past auto-collapse.
+- Label: `Thought for {n}s` when complete, `Thinking...` (animate-pulse) while streaming.
+- If there is no thinking and no content yet but the run is loading, renders a single `Thinking...` placeholder.
+
+### 11.5 `ToolCallMessage`
+
+Renders a tool call as a single-line summary with an expandable detail strip. Status mapping:
+
+| Status      | Visual                                                              |
+| ----------- | ------------------------------------------------------------------- |
+| `started`/`executing` | Pulsing accent-colored dot; tool name pulses; left border bright accent. |
+| `completed` | Static muted dot; left border muted.                                |
+| `failed`    | Static muted dot; red `failed` chip after the tool name.            |
+
+Auto-collapses when complete unless this message is the latest. `userToggledRef` overrides auto-collapse after manual toggle.
+
+Args/result/error formatting:
+- Single-key args under 120 chars render as `key: value`.
+- Otherwise `JSON.stringify(args, null, 2)`.
+- Result: passthrough string, otherwise `JSON.stringify(result, null, 2)`.
+- Each strip has its own scroll caps: args `max-h-[120px]`, results `max-h-[200px]`, errors `max-h-[120px]`.
+
+### 11.6 `SubagentMessage`
+
+Same collapse/state pattern as `ToolCallMessage`, with an `AgentIcon` marker. Shows the subagent's `goal` (from `subagentMeta`) and, if present, the tool result and any error. Adds a `done` chip on completion and `failed` chip on failure.
+
+### 11.7 `ConfirmationCard`
+
+Renders a single `PendingConfirmation`. Layout:
+
+- Accent-colored alert icon, the `actionName` label, then `message`.
+- "Approve" (primary accent button), "Reject" (border-only neutral), "Add feedback" link.
+- When "Add feedback" is clicked, reveals a `<textarea>` for free-text feedback.
+- Both buttons disable while `resolving` is true and call `onResolve(confirmationID, approved, feedback?)` (feedback is trimmed; empty becomes `undefined`).
+
+The cards are rendered after the message list in `SeraChat`, so they appear inline with the conversation flow.
+
+### 11.8 `ImageUploadInput`
+
+The "live" input bar. Props:
+
+```ts
+{
+  inProgress: boolean;
+  onSend: (text: string) => Promise<any>;
+  onStop?: () => void;
+  queue: string[];
+  onDismissFromQueue: (index: number) => void;
+  selectedModel: string;
+  onModelChange: (modelId: string) => void;
+}
+```
+
+Features:
+- **Drag & drop and file picker** — accepts only `image/*` MIME types. Files become local previews via `FileReader.readAsDataURL`. Each preview gets a `crypto.randomUUID()` local id (distinct from the SERA-issued image id assigned on upload).
+- **Upload sequencing** — on send, every selected file is uploaded **concurrently** via `Promise.all(images.map(async (img) => { const id = await uploadImage(img.file); addImage(id, img.preview, img.file.type); return id; }))`. Each returned `imageID` is registered with `ImageCacheContext.addImage(id, preview, mimeType)` inside the same callback so future renders can find the local preview.
+- **Markers** — uploaded image IDs are formatted as `[IMG:<id>]` (space-joined when multiple) and appended to the message text. If the user typed no text but selected images, the default message is `"Analyze this image"`.
+- **Queue display** — when `queue.length > 0`, a stack of "Queued: ..." chips with per-row dismiss buttons appears above the input.
+- **Stop vs send** — when `inProgress` is true, both stop (red) and send (accent) buttons are visible; send becomes "Queue message" semantically.
+- **Drop zone** — `isDragging` adds a dashed accent ring around the input and a centered "Drop images here" overlay.
+- **Textarea autosize** — `onInput` resizes height to `min(scrollHeight, 200px)`. Enter sends; Shift+Enter inserts a newline.
+- **Placeholders** — `"Drop images here..."` when dragging, `"Uploading images..."` when uploading, `"Queue a message..."` when `inProgress`, otherwise `"Reply..."`.
+- **Autofocus** — the textarea is `autoFocus`.
+
+### 11.9 `WelcomeView`
+
+Empty-state input. Form-based (`<form onSubmit>`); Enter submits unless shift-held. No image upload (the paperclip-like ImageIcon button is a static button with `type="button"` and no click handler — it is currently a UI placeholder). Includes a `ModelSelector`.
+
+Layout: `pt-[32vh]` pushes the greeting and input down to roughly the upper third of the viewport, matching standard "Hello, how can I help?" empty-state aesthetics.
+
+### 11.10 `ModelSelector`
+
+Drop-up menu anchored to the model name. Props: `{ selectedModel, onModelChange, disabled? }`. Behaviors:
+
+- Groups via `groupModelsByProvider()` (label-based grouping, see [Models](#12-models)).
+- Closes on outside click via a `mousedown` document listener.
+- Active model row is accent-colored and uses `bg-accent-muted`.
+
+### 11.11 `Sidebar`
+
+Collapsible navigation column. Top-level state:
+- `isCollapsed` — drives the container width (`48px` collapsed, `287px` expanded).
+- `contentCollapsed` — switches the inner layout to icon-only mode. Set asynchronously so the width animation completes before content collapses (avoids text reflow during animation).
+
+Transition: `width 300ms cubic-bezier(0.2, 0, 0, 1)`. The end handler distinguishes the property and target so child transitions don't cause spurious updates.
+
+Two `<aside>` elements are mounted: a desktop one (`hidden lg:flex`, inline in layout) and a mobile one (`lg:hidden fixed left-0 top-0 z-40`). Both render identical `SidebarContent` so collapsed/expanded behavior is consistent across breakpoints.
+
+Nav items:
+- **New chat** — `startNewChat()` then `router.push("/new")`.
+- **Search** — no handler.
+- **Chats** — no handler.
+- **Manage** — `router.push("/manage")`. `isActive` when `pathname.startsWith("/manage")`.
+
+Recents list:
+- Only rendered when expanded and `recentChats.length > 0`. Reads from `useChat()`.
+- Active chat (derived from the URL via `pathname.match(/^\/chat\/(.+)/)`) is highlighted.
+- Clicks call `router.push(/chat/${id})` (skipping if it matches the current chat).
+
+User profile dropdown:
+- Click toggles `isUserMenuOpen`. Outside click closes it (mousedown listener).
+- Drop-up panel uses a grid-row-template-rows animation (`grid-rows-[0fr]` → `grid-rows-[1fr]`) for height animation without `max-height` hacks.
+- The Log out row shows the live session timer via `useSessionTimer(expiresAt)` next to the LogOut icon; placeholder is `"--:--"`.
+- Auto-closes when the sidebar collapses.
+
+### 11.12 `PromptsPanel`
+
+Master/detail editor. Local state: `prompts`, `selected`, `draft`, `loading`, `saving`, `error`.
+
+- **List** — `PromptList`; renders each prompt as a row with `slug`, optional `description`, optional `extends X` annotation. Spinner during load; "No prompts found" empty state.
+- **Detail** — `PromptEditor`; full-height `<textarea>` (monospace) bound to `draft`. `isDirty` is `draft !== selected.content`. Save passes through `extends`, `description`, and `metadata` unchanged. After save, the panel refreshes the list and re-sets `selected` from the response.
+- **Back** chevron returns to the list, resetting `selected`, `draft`, and `error`.
+- Errors render as a red banner above the content.
+
+### 11.13 `SkillsPanel`
+
+Same master/detail pattern. Local state: `skills`, `selected`, `draftContent`, `draftDescription`, `loading`, `saving`, `error`.
+
+- **List** — `SkillList`; each row shows the name, a colored status chip (`active`/`stale`/`archived`), description, and `tools: …` summary if `allowedTools.length > 0`. Status chip colors:
+  - `active` → green
+  - `stale` → yellow
+  - `archived` → muted foreground
+- **Detail** — separate inputs for description and content. `isDirty` requires either to differ from `selected`. After save, both drafts are reset from the response. The selected skill's bundled files are listed as read-only chips (paths only — content is not editable here).
+
+### 11.14 `Markdown`
+
+Renders Markdown via `ReactMarkdown` with:
+- `remarkPlugins`: `[remarkGfm, remarkBreaks]` — GitHub-flavored Markdown plus line-break preservation.
+- `rehypePlugins`: `[rehypeHighlight]` — `highlight.js`-based syntax highlighting; CSS imported once from `highlight.js/styles/github-dark-dimmed.css`.
+- Default `className` chain: `prose prose-invert prose-sm` with custom `prose-*` overrides for spacing, code color (`#a4c639`, the accent), links (accent, underline-on-hover), code-block backgrounds (`#2d2a27`), and blockquote border (accent).
+- The `className` prop overrides the default entirely.
+
+### 11.15 `IconButton`
+
+Reusable 40×40 button with variants:
+
+| Variant   | Style                                                                                                         |
+| --------- | ------------------------------------------------------------------------------------------------------------- |
+| `default` | `bg-background-secondary` border, foreground-muted icon                                                       |
+| `danger`  | Red (`#e74c3c`)                                                                                              |
+| `primary` | Accent green                                                                                                 |
+
+Forwards all native `<button>` props. Disabled state lowers opacity to 50% and removes the pointer cursor.
+
+### 11.16 `Icons`
+
+Single module exporting hand-rolled SVG icons used in the chat surface (where `lucide-react` is intentionally avoided for tighter visual control):
+
+- `ImageIcon`, `SendIcon`, `StopIcon`, `ChevronIcon` (rotates 90deg when `isOpen`), `DotIcon`, `AgentIcon` (subagent marker), `ChevronUpDownIcon`, `CloseIcon`.
+
+All accept `className`; `ChevronIcon` adds `isOpen?: boolean`.
+
+### 11.17 `ImageThumbnail`
+
+Sized image card with optional remove button.
+
+| Size  | Dimensions                          |
+| ----- | ----------------------------------- |
+| `sm`  | `h-16 w-16` (64×64)                  |
+| `md`  | `h-20 w-20` (80×80, default)         |
+| `lg`  | `max-w-[200px] max-h-[200px]`        |
+
+Remove button is rendered only when `onRemove` is supplied. It is positioned `-top-2 -right-2`, hidden until hover, and disabled while `disabled` is true.
+
+---
+
+## 12. Models
+
+Defined in `app/lib/models.ts` (client-safe — used directly by `ModelSelector` and `useAgentChat`).
+
+```ts
+interface ModelOption { id: string; name: string; provider: string; label: string; }
+```
+
+| ID                                            | Display Name              | Provider     | Group Label |
+| --------------------------------------------- | ------------------------- | ------------ | ----------- |
+| `anthropic/claude-haiku-4-5`                  | Haiku 4.5                 | `anthropic`  | Claude      |
+| `anthropic/claude-sonnet-4-6`                 | Sonnet 4.6                | `anthropic`  | Claude      |
+| `anthropic/claude-opus-4-7`                   | Opus 4.7                  | `anthropic`  | Claude      |
+| `openai/gpt-4o-mini`                          | GPT-4o Mini               | `openai`     | ChatGPT     |
+| `openai/gpt-4o`                               | GPT-4o                    | `openai`     | ChatGPT     |
+| `openai/o3`                                   | o3                        | `openai`     | ChatGPT     |
+| `vllm/Qwen3.6-27B-FP8`                        | Qwen 3.6 27B FP8          | `vllm`       | vLLM        |
+| `vllm/Huihui-Qwen3.6-27B-abliterated`         | Qwen 3.6 27B Abliterated  | `vllm`       | vLLM        |
+
+`DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"` has a single consumer:
+- `SeraChat` reads it at two call sites — when rendering `<WelcomeView>` and when rendering `<ImageUploadInput>` — to supply `selectedModel={model ?? DEFAULT_MODEL}`.
+- The `useAgentChat` hook itself does **not** apply a default — it sends `model: undefined` to the backend if no model is selected, letting SERA fall back to `PRIMARY_MODEL`.
+
+Helpers:
+- `getModelByID(id)` — strict lookup; used to validate `localStorage["sera:lastModel"]`.
+- `getModelDisplayName(id)` — display string; falls back to the last `/`-separated segment of the id if unknown, or the raw id.
+- `groupModelsByProvider()` — groups by `label` (so OpenAI models read "ChatGPT" rather than "openai"), preserves insertion order. Returns `[label, ModelOption[]][]`.
+
+Persistence: the most recent model is mirrored to `localStorage["sera:lastModel"]` by `setModel`.
+
+---
+
+## 13. Image Handling
+
+### 13.1 Lifecycle
+
+1. **Local preview** — `ImageUploadInput.handleFiles` reads each file with `FileReader.readAsDataURL`, mints a local UUID, and stores `{ id, file, preview }` in component state.
+2. **Upload** — On submit, each file is sent to SERA via the `uploadImage` server action (`POST /api/v1/agent/upload-image`, multipart `image` field). SERA returns `{ imageID, mimeType }`; the UI keeps only `imageID`.
+3. **Cache** — Each `imageID` is paired with the local data-URL preview in `ImageCacheContext.addImage(id, preview, mimeType)`.
+4. **Markers** — `[IMG:<imageID>]` strings are appended to the message text (space-separated when multiple). SERA replaces these with actual image attachments when calling the model.
+5. **Trim** — After every batch, `clearOldImages()` keeps the map at ≤50 entries (insertion-order LRU).
+
+### 13.2 Display
+
+`UserMessage` matches `[IMG:<id>]` against `ImageCacheContext.getImage(id)`. When a hit exists, the preview renders as a `lg` thumbnail; when missing (page refreshed mid-conversation, new tab, etc.), the marker is simply stripped from the displayed text and no thumbnail appears.
+
+### 13.3 Constraints
+
+The UI permits any `image/*` MIME and any size at the client. SERA enforces the 5 MB / JPEG-PNG-GIF-WebP constraint described in SERA SPEC §5.2; the server action surfaces any 4xx/5xx as a thrown error message that bubbles into a `console.error`.
+
+---
+
+## 14. Styling & Theming
+
+### 14.1 CSS Layer
+
+`app/globals.css`:
+
+```css
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme inline {
+  --color-background:           #1a1915;
+  --color-background-secondary: #2d2a27;
+  --color-background-tertiary:  #3d3a37;
+  --color-foreground:           #ece8e1;
+  --color-foreground-muted:     #a39e93;
+  --color-border:               #3d3a37;
+  --color-accent:               #a4c639;
+  --color-accent-hover:         #b8d44d;
+  --color-accent-muted:         rgba(164, 198, 57, 0.15);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+```
+
+- Scrollbars are styled globally (Firefox `scrollbar-width: thin`; WebKit `::-webkit-scrollbar` 8×8 with rounded thumb).
+- A single keyframe is defined: `indeterminate` (sweeps `translateX(-100%)` → `translateX(300%)`). No component currently references it — it is reserved for a future indeterminate-progress treatment.
+- The `pulse` keyframe used by the streaming caret comes from Tailwind's default animation set (referenced as `animation: pulse 0.8s steps(1) infinite`).
+
+### 14.2 Token Usage
+
+Tailwind utility classes derived from the `@theme` palette:
+
+| Token                     | Tailwind utility                          | Common use                                       |
+| ------------------------- | ----------------------------------------- | ------------------------------------------------ |
+| `--color-background`      | `bg-background`                           | App root / chat surface                          |
+| `--color-background-secondary` | `bg-background-secondary`            | Sidebar, input bar                               |
+| `--color-background-tertiary`  | `bg-background-tertiary`             | Hover/active highlights, user bubble             |
+| `--color-foreground`      | `text-foreground`                         | Primary text                                     |
+| `--color-foreground-muted`| `text-foreground-muted`                   | Secondary text                                   |
+| `--color-border`          | `border-border`                           | Dividers                                         |
+| `--color-accent`          | `bg-accent`, `text-accent`, etc.          | Send button, code links, active streaming markers |
+| `--color-accent-hover`    | `bg-accent-hover`                         | Send button hover                                |
+| `--color-accent-muted`    | `bg-accent-muted`                         | Selected model row, confirmation card background |
+
+### 14.3 Layout Tokens
+
+- Chat content column width is hard-capped at `max-w-[672px]` and centered (`mx-auto`).
+- Welcome layout uses `pt-[32vh]` to position the greeting and input near the upper third.
+- Sidebar widths: 48 px (collapsed) and 287 px (expanded).
+- Streaming detail strips: thinking max height `200px`, tool args `120px`, tool result `200px`, errors `120px`.
+
+### 14.4 Dark Mode
+
+Hard-coded — the root `<html>` always carries `class="dark"`. No theme toggle exists.
+
+---
+
+## 15. Build & Deployment
+
+### 15.1 Scripts (`package.json`)
+
+| Script  | Command          | Purpose                                                              |
+| ------- | ---------------- | -------------------------------------------------------------------- |
+| `dev`   | `next dev`       | Local development server (default port 3000)                         |
+| `build` | `next build`     | Production build (standalone output)                                 |
+| `start` | `next start`     | Run the standalone build                                             |
+| `lint`  | `eslint`         | Lint via flat config (`next/core-web-vitals` + `next/typescript`)    |
+
+### 15.2 Next.js Config
+
+```ts
+const nextConfig: NextConfig = { output: "standalone" };
+```
+
+Standalone output emits `.next/standalone/server.js` plus a trimmed `node_modules`, ready to copy into a minimal container.
+
+### 15.3 Dockerfile
+
+Three stages, all on `node:22-alpine`:
+
+| Stage         | Steps                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------- |
+| `deps`        | `apk add libc6-compat`; `npm ci` from `package.json` + `package-lock.json`              |
+| `builder`     | Copy deps; `NEXT_TELEMETRY_DISABLED=1`; `npm run build`                                 |
+| `production`  | Copy `public/`, `.next/standalone`, `.next/static`; create `nextjs:nodejs` user (1001/1001); run as non-root; `EXPOSE 3000`; `HOSTNAME=0.0.0.0`; `PORT=3000` |
+
+The container's `HEALTHCHECK` calls `wget --spider http://localhost:3000/health` every 30 s (10 s timeout, 5 s start period, 3 retries).
+
+Final entrypoint: `node server.js` (the standalone build's bundled server).
+
+### 15.4 Reverse-proxy Expectations
+
+- `AUTH_TRUST_HOST=true` and a correct `AUTH_URL` are required when running behind a TLS-terminating proxy so Auth.js builds the callback URL correctly.
+- The proxy must forward cookies for the agent rewrite to work: `SERA_API_URL` is consumed in `proxy.ts` and called server-to-server, then the response (including any `Set-Cookie` from SERA) is streamed back.
+
+### 15.5 Health Endpoint
+
+`GET /health` is matched-out of the proxy (`proxy.ts`'s matcher excludes `health`) and returns `{ status: "ok" }` JSON. Suitable for Kubernetes liveness/readiness probes and the Docker healthcheck.
+
+---
