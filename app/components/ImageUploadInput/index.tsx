@@ -8,6 +8,14 @@ import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
 import { uploadImage as uploadImageAction } from "@/app/actions/chat";
 
+const ACCEPTED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+
 interface ImageUploadInputProps {
   inProgress: boolean;
   onSend: (text: string) => Promise<void>;
@@ -18,9 +26,19 @@ interface ImageUploadInputProps {
   onModelChange: (modelId: string) => void;
 }
 
-export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissFromQueue, selectedModel, onModelChange }: ImageUploadInputProps) {
+export function ImageUploadInput({
+  inProgress,
+  onSend,
+  onStop,
+  queue,
+  onDismissFromQueue,
+  selectedModel,
+  onModelChange,
+}: ImageUploadInputProps) {
   const [message, setMessage] = useState("");
-  const [images, setImages] = useState<Array<{ id: string; file: File; preview: string }>>([]);
+  const [images, setImages] = useState<
+    Array<{ id: string; file: File; preview: string }>
+  >([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -39,9 +57,21 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
 
-    const imageFiles = Array.from(files).filter((file) =>
-      file.type.startsWith("image/")
-    );
+    const imageFiles = Array.from(files).filter((file) => {
+      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+        console.error(
+          `[ImageUploadInput] Unsupported image type: ${file.type || file.name}`,
+        );
+        return false;
+      }
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+        console.error(
+          `[ImageUploadInput] Image too large: ${file.name} exceeds 5MB`,
+        );
+        return false;
+      }
+      return true;
+    });
 
     const newImages = await Promise.all(
       imageFiles.map(async (file) => {
@@ -51,7 +81,7 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
           file,
           preview,
         };
-      })
+      }),
     );
 
     setImages((prev) => [...prev, ...newImages]);
@@ -80,11 +110,12 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const uploadImage = async (file: File): Promise<string> => {
+  const uploadImage = async (
+    file: File,
+  ): Promise<{ imageID: string; mimeType: string }> => {
     const formData = new FormData();
-    formData.append('image', file);
-    const result = await uploadImageAction(formData);
-    return result.imageID;
+    formData.append("image", file);
+    return uploadImageAction(formData);
   };
 
   const handleSubmit = async () => {
@@ -98,17 +129,17 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
 
       const imageIDs = await Promise.all(
         images.map(async (img) => {
-          const id = await uploadImage(img.file);
-          addImage(id, img.preview, img.file.type);
-          return id;
-        })
+          const uploaded = await uploadImage(img.file);
+          addImage(uploaded.imageID, img.preview, uploaded.mimeType);
+          return uploaded.imageID;
+        }),
       );
 
       clearOldImages();
 
       let finalMessage = userMessage;
       if (imageIDs.length > 0) {
-        const imageMarkers = imageIDs.map(id => `[IMG:${id}]`).join(' ');
+        const imageMarkers = imageIDs.map((id) => `[IMG:${id}]`).join(" ");
         finalMessage = `${userMessage} ${imageMarkers}`;
       }
 
@@ -121,7 +152,8 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
       await onSend(finalMessage);
     } catch (error) {
       console.error("Failed to send message:", error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to send message";
       if (errorMessage !== "Session expired") {
         console.error("[ImageUploadInput] Error:", errorMessage);
       }
@@ -171,7 +203,7 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
       <div
         className={clsx(
           "relative flex flex-col w-full max-w-[672px] bg-background-secondary rounded-3xl transition-colors",
-          isDragging && "ring-2 ring-dashed ring-accent"
+          isDragging && "ring-2 ring-dashed ring-accent",
         )}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
@@ -206,7 +238,15 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
-          placeholder={isDragging ? "Drop images here..." : uploading ? "Uploading images..." : inProgress ? "Queue a message..." : "Reply..."}
+          placeholder={
+            isDragging
+              ? "Drop images here..."
+              : uploading
+                ? "Uploading images..."
+                : inProgress
+                  ? "Queue a message..."
+                  : "Reply..."
+          }
           className="flex-1 bg-transparent text-foreground text-sm px-4 pt-4 pb-2 resize-none outline-none placeholder-foreground-muted min-h-[24px] max-h-[200px]"
           rows={1}
           autoFocus
@@ -233,7 +273,10 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
             {inProgress && onStop && (
               <button
                 onClick={onStop}
-                className={clsx(actionButtonBase, "bg-[#e74c3c] hover:bg-[#c0392b] text-white")}
+                className={clsx(
+                  actionButtonBase,
+                  "bg-[#e74c3c] hover:bg-[#c0392b] text-white",
+                )}
                 title="Stop generation"
               >
                 <StopIcon className="w-4 h-4" />
@@ -242,7 +285,10 @@ export function ImageUploadInput({ inProgress, onSend, onStop, queue, onDismissF
             <button
               onClick={handleSubmit}
               disabled={!canSend || uploading}
-              className={clsx(actionButtonBase, "bg-accent hover:bg-accent-hover text-background")}
+              className={clsx(
+                actionButtonBase,
+                "bg-accent hover:bg-accent-hover text-background",
+              )}
               title={inProgress ? "Queue message" : "Send message"}
             >
               <SendIcon className="w-4 h-4" />

@@ -20,6 +20,7 @@ interface AgentEvent {
   threadID: string;
   timestamp: number;
   data: unknown;
+  streamID?: string;
 }
 
 interface UseAgentChatOptions {
@@ -43,16 +44,28 @@ interface UseAgentChatReturn {
   queue: string[];
   dismissFromQueue: (index: number) => void;
   pendingConfirmations: PendingConfirmation[];
-  resolveConfirmation: (confirmationID: string, approved: boolean, feedback?: string) => Promise<void>;
+  resolveConfirmation: (
+    confirmationID: string,
+    approved: boolean,
+    feedback?: string,
+  ) => Promise<void>;
 }
 
-export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatReturn {
-  const [messages, setMessages] = useState<Message[]>(options.initialMessages ?? []);
+export function useAgentChat(
+  options: UseAgentChatOptions = {},
+): UseAgentChatReturn {
+  const [messages, setMessages] = useState<Message[]>(
+    options.initialMessages ?? [],
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [chatID, setChatID] = useState<string | null>(options.chatID ?? null);
-  const [threadID, setThreadID] = useState<string | null>(options.threadID ?? null);
+  const [threadID, setThreadID] = useState<string | null>(
+    options.threadID ?? null,
+  );
   const [runID, setRunID] = useState<string | null>(null);
-  const [model, setModelState] = useState<string | null>(options.initialModel ?? null);
+  const [model, setModelState] = useState<string | null>(
+    options.initialModel ?? null,
+  );
 
   useEffect(() => {
     if (!options.initialModel) {
@@ -70,7 +83,9 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     localStorage.setItem("sera:lastModel", value);
   }, []);
   const [queue, setQueue] = useState<string[]>([]);
-  const [pendingConfirmations, setPendingConfirmations] = useState<PendingConfirmation[]>([]);
+  const [pendingConfirmations, setPendingConfirmations] = useState<
+    PendingConfirmation[]
+  >([]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -116,7 +131,13 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     if (options.initialModel) {
       setModelState(options.initialModel);
     }
-  }, [options.chatID, options.initialMessages, options.threadID, options.initialModel, cleanup]);
+  }, [
+    options.chatID,
+    options.initialMessages,
+    options.threadID,
+    options.initialModel,
+    cleanup,
+  ]);
 
   const stopGeneration = useCallback(() => {
     if (runID) {
@@ -130,218 +151,273 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const updateAssistantMessage = useCallback((patch: Partial<Message>) => {
     const id = assistantIdRef.current;
     setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+      prev.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     );
   }, []);
 
-  const handleEvent = useCallback((event: AgentEvent) => {
-    const replaying = replayingRef.current;
+  const handleEvent = useCallback(
+    (event: AgentEvent) => {
+      const replaying = replayingRef.current;
 
-    switch (event.type) {
-      case "thinking.delta": {
-        const { content } = event.data as { content: string };
-        thinkingContentRef.current += content;
-        if (!replaying) {
-          if (thinkingStartTimeRef.current === null) {
-            thinkingStartTimeRef.current = Date.now();
+      switch (event.type) {
+        case "thinking.delta": {
+          const { content } = event.data as { content: string };
+          thinkingContentRef.current += content;
+          if (!replaying) {
+            if (thinkingStartTimeRef.current === null) {
+              thinkingStartTimeRef.current = Date.now();
+            }
+            updateAssistantMessage({ thinking: thinkingContentRef.current });
+          } else if (thinkingStartTimeRef.current === null) {
+            thinkingStartTimeRef.current = event.timestamp;
           }
-          updateAssistantMessage({ thinking: thinkingContentRef.current });
-        } else if (thinkingStartTimeRef.current === null) {
-          thinkingStartTimeRef.current = event.timestamp;
-        }
-        break;
-      }
-
-      case "thinking.done": {
-        const { content } = event.data as { content: string };
-        if (content) thinkingContentRef.current = content;
-        thinkingDoneRef.current = true;
-        if (!replaying) {
-          if (thinkingStartTimeRef.current !== null) {
-            thinkingDurationRef.current = Math.round((Date.now() - thinkingStartTimeRef.current) / 1000);
-          }
-          updateAssistantMessage({
-            thinking: thinkingContentRef.current,
-            thinkingDuration: thinkingDurationRef.current,
-          });
-        } else if (thinkingStartTimeRef.current !== null) {
-          thinkingDurationRef.current = Math.round((event.timestamp - thinkingStartTimeRef.current) / 1000);
-        }
-        break;
-      }
-
-      case "text.delta": {
-        const { content } = event.data as { content: string };
-        assistantContentRef.current += content;
-        if (!replaying) {
-          updateAssistantMessage({ content: assistantContentRef.current });
-        }
-        break;
-      }
-
-      case "text.done": {
-        const { content } = event.data as { content: string };
-        if (content) assistantContentRef.current = content;
-        if (!replaying) {
-          updateAssistantMessage({ content: assistantContentRef.current });
-        }
-        break;
-      }
-
-      case "run.completed": {
-        if (replaying) {
-          replayTerminalRef.current = event;
           break;
         }
-        const { response } = event.data as { response: string };
-        if (response && !assistantContentRef.current) {
-          updateAssistantMessage({ content: response });
-        }
-        sendingRef.current = false;
-        reconnectingRef.current = false;
-        cleanup();
-        setIsLoading(false);
-        break;
-      }
 
-      case "run.failed": {
-        if (replaying) {
-          replayTerminalRef.current = event;
+        case "thinking.done": {
+          const { content } = event.data as { content: string };
+          if (content) thinkingContentRef.current = content;
+          thinkingDoneRef.current = true;
+          if (!replaying) {
+            if (thinkingStartTimeRef.current !== null) {
+              thinkingDurationRef.current = Math.round(
+                (Date.now() - thinkingStartTimeRef.current) / 1000,
+              );
+            }
+            updateAssistantMessage({
+              thinking: thinkingContentRef.current,
+              thinkingDuration: thinkingDurationRef.current,
+            });
+          } else if (thinkingStartTimeRef.current !== null) {
+            thinkingDurationRef.current = Math.round(
+              (event.timestamp - thinkingStartTimeRef.current) / 1000,
+            );
+          }
           break;
         }
-        const { error } = event.data as { error: string };
-        const id = assistantIdRef.current;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === id
-              ? { ...m, content: m.content || `Error: ${error}` }
-              : m
-          )
-        );
-        sendingRef.current = false;
-        reconnectingRef.current = false;
-        cleanup();
-        setIsLoading(false);
-        break;
-      }
 
-      case "confirmation.required": {
-        const { confirmationID, actionName, args, message } = event.data as {
-          confirmationID: string;
-          actionName: string;
-          args: Record<string, unknown>;
-          message: string;
-        };
-        if (replaying) {
-          replayConfirmationsRef.current.push({
-            confirmationID, actionName, args, message, threadID: event.threadID,
-          });
-        } else {
-          setPendingConfirmations((prev) => [
-            ...prev,
-            { confirmationID, actionName, args, message, threadID: event.threadID },
-          ]);
+        case "text.delta": {
+          const { content } = event.data as { content: string };
+          assistantContentRef.current += content;
+          if (!replaying) {
+            updateAssistantMessage({ content: assistantContentRef.current });
+          }
+          break;
         }
-        break;
-      }
 
-      case "confirmation.resolved": {
-        const { confirmationID } = event.data as { confirmationID: string };
-        if (replaying) {
-          replayConfirmationsRef.current = replayConfirmationsRef.current.filter(
-            (c) => c.confirmationID !== confirmationID,
+        case "text.done": {
+          const { content } = event.data as { content: string };
+          if (content) assistantContentRef.current = content;
+          if (!replaying) {
+            updateAssistantMessage({ content: assistantContentRef.current });
+          }
+          break;
+        }
+
+        case "run.completed": {
+          if (replaying) {
+            replayTerminalRef.current = event;
+            break;
+          }
+          const { response } = event.data as { response: string };
+          if (response && !assistantContentRef.current) {
+            updateAssistantMessage({ content: response });
+          }
+          sendingRef.current = false;
+          reconnectingRef.current = false;
+          cleanup();
+          setIsLoading(false);
+          break;
+        }
+
+        case "run.failed": {
+          if (replaying) {
+            replayTerminalRef.current = event;
+            break;
+          }
+          const { error } = event.data as { error: string };
+          const id = assistantIdRef.current;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id
+                ? { ...m, content: m.content || `Error: ${error}` }
+                : m,
+            ),
           );
-        } else {
-          setPendingConfirmations((prev) =>
-            prev.filter((c) => c.confirmationID !== confirmationID)
+          sendingRef.current = false;
+          reconnectingRef.current = false;
+          cleanup();
+          setIsLoading(false);
+          break;
+        }
+
+        case "run.cancelled": {
+          if (replaying) {
+            replayTerminalRef.current = event;
+            break;
+          }
+          const { reason } = event.data as { reason?: string };
+          const id = assistantIdRef.current;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id
+                ? { ...m, content: m.content || reason || "Run cancelled." }
+                : m,
+            ),
           );
+          sendingRef.current = false;
+          reconnectingRef.current = false;
+          cleanup();
+          setIsLoading(false);
+          break;
         }
-        break;
-      }
 
-      case "tool_call.started": {
-        const { toolCallID, toolName, args } = event.data as {
-          toolCallID: string; toolName: string; args: Record<string, unknown>;
-        };
-        toolCallsRef.current = [
-          ...toolCallsRef.current,
-          { toolCallID, toolName, args, status: "started" },
-        ];
-        if (!replaying) {
-          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-        }
-        break;
-      }
-
-      case "tool_call.executing": {
-        const { toolCallID } = event.data as { toolCallID: string };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc
-        );
-        if (!replaying) {
-          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-        }
-        break;
-      }
-
-      case "tool_call.result": {
-        const { toolCallID, result } = event.data as {
-          toolCallID: string; result: unknown;
-        };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID ? { ...tc, status: "completed", result } : tc
-        );
-        if (!replaying) {
-          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-        }
-        break;
-      }
-
-      case "tool_call.error": {
-        const { toolCallID, error } = event.data as {
-          toolCallID: string; error: string;
-        };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID ? { ...tc, status: "failed", error } : tc
-        );
-        if (!replaying) {
-          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-        }
-        break;
-      }
-
-      case "subagent.spawned": {
-        const { toolCallID, subagentRunID, subagentThreadID, agentID, goal } =
-          event.data as {
-            toolCallID: string; subagentRunID: string;
-            subagentThreadID: string; agentID: string; goal: string;
+        case "confirmation.required": {
+          const { confirmationID, actionName, args, message } = event.data as {
+            confirmationID: string;
+            actionName: string;
+            args: Record<string, unknown>;
+            message: string;
           };
-        toolCallsRef.current = toolCallsRef.current.map((tc) =>
-          tc.toolCallID === toolCallID
-            ? {
-                ...tc,
-                isSubagent: true,
-                subagentMeta: { runID: subagentRunID, threadID: subagentThreadID, agentID, goal },
-              }
-            : tc
-        );
-        if (!replaying) {
-          updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+          if (replaying) {
+            replayConfirmationsRef.current.push({
+              confirmationID,
+              actionName,
+              args,
+              message,
+              threadID: event.threadID,
+            });
+          } else {
+            setPendingConfirmations((prev) => [
+              ...prev,
+              {
+                confirmationID,
+                actionName,
+                args,
+                message,
+                threadID: event.threadID,
+              },
+            ]);
+          }
+          break;
         }
-        break;
+
+        case "confirmation.resolved": {
+          const { confirmationID } = event.data as { confirmationID: string };
+          if (replaying) {
+            replayConfirmationsRef.current =
+              replayConfirmationsRef.current.filter(
+                (c) => c.confirmationID !== confirmationID,
+              );
+          } else {
+            setPendingConfirmations((prev) =>
+              prev.filter((c) => c.confirmationID !== confirmationID),
+            );
+          }
+          break;
+        }
+
+        case "tool_call.started": {
+          const { toolCallID, toolName, args } = event.data as {
+            toolCallID: string;
+            toolName: string;
+            args: Record<string, unknown>;
+          };
+          toolCallsRef.current = [
+            ...toolCallsRef.current,
+            { toolCallID, toolName, args, status: "started" },
+          ];
+          if (!replaying) {
+            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+          }
+          break;
+        }
+
+        case "tool_call.executing": {
+          const { toolCallID } = event.data as { toolCallID: string };
+          toolCallsRef.current = toolCallsRef.current.map((tc) =>
+            tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc,
+          );
+          if (!replaying) {
+            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+          }
+          break;
+        }
+
+        case "tool_call.result": {
+          const { toolCallID, result } = event.data as {
+            toolCallID: string;
+            result: unknown;
+          };
+          toolCallsRef.current = toolCallsRef.current.map((tc) =>
+            tc.toolCallID === toolCallID
+              ? { ...tc, status: "completed", result }
+              : tc,
+          );
+          if (!replaying) {
+            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+          }
+          break;
+        }
+
+        case "tool_call.error": {
+          const { toolCallID, error } = event.data as {
+            toolCallID: string;
+            error: string;
+          };
+          toolCallsRef.current = toolCallsRef.current.map((tc) =>
+            tc.toolCallID === toolCallID
+              ? { ...tc, status: "failed", error }
+              : tc,
+          );
+          if (!replaying) {
+            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+          }
+          break;
+        }
+
+        case "subagent.spawned": {
+          const { toolCallID, subagentRunID, subagentThreadID, agentID, goal } =
+            event.data as {
+              toolCallID: string;
+              subagentRunID: string;
+              subagentThreadID: string;
+              agentID: string;
+              goal: string;
+            };
+          toolCallsRef.current = toolCallsRef.current.map((tc) =>
+            tc.toolCallID === toolCallID
+              ? {
+                  ...tc,
+                  isSubagent: true,
+                  subagentMeta: {
+                    runID: subagentRunID,
+                    threadID: subagentThreadID,
+                    agentID,
+                    goal,
+                  },
+                }
+              : tc,
+          );
+          if (!replaying) {
+            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
+          }
+          break;
+        }
+
+        case "subagent.completed":
+        case "subagent.failed":
+          break;
+
+        case "plan.created":
+        case "plan.step_updated":
+        case "evaluation.done":
+        case "error":
+          break;
       }
-
-      case "subagent.completed":
-      case "subagent.failed":
-        break;
-
-      case "plan.created":
-      case "plan.step_updated":
-      case "evaluation.done":
-      case "error":
-        break;
-    }
-  }, [cleanup, updateAssistantMessage]);
+    },
+    [cleanup, updateAssistantMessage],
+  );
 
   const flushReplay = useCallback(() => {
     replayingRef.current = false;
@@ -350,7 +426,8 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
       content: assistantContentRef.current,
       thinking: thinkingContentRef.current || undefined,
       thinkingDuration: thinkingDurationRef.current,
-      toolCalls: toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
+      toolCalls:
+        toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
     });
 
     if (replayConfirmationsRef.current.length > 0) {
@@ -365,116 +442,127 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
     }
   }, [updateAssistantMessage, handleEvent]);
 
-  const subscribeToStream = useCallback((streamRunID: string, replay = false) => {
-    assistantIdRef.current = assistantIdRef.current || crypto.randomUUID();
-    assistantContentRef.current = "";
-    thinkingContentRef.current = "";
-    thinkingDoneRef.current = false;
-    thinkingStartTimeRef.current = null;
-    thinkingDurationRef.current = undefined;
-    toolCallsRef.current = [];
-    replayingRef.current = replay;
-    replayConfirmationsRef.current = [];
-    replayTerminalRef.current = null;
+  const subscribeToStream = useCallback(
+    (streamRunID: string, replay = false) => {
+      assistantIdRef.current = assistantIdRef.current || crypto.randomUUID();
+      assistantContentRef.current = "";
+      thinkingContentRef.current = "";
+      thinkingDoneRef.current = false;
+      thinkingStartTimeRef.current = null;
+      thinkingDurationRef.current = undefined;
+      toolCallsRef.current = [];
+      replayingRef.current = replay;
+      replayConfirmationsRef.current = [];
+      replayTerminalRef.current = null;
 
-    setIsLoading(true);
+      setIsLoading(true);
 
-    const es = new EventSource(`${API_BASE}/stream/${streamRunID}`);
-    eventSourceRef.current = es;
+      const es = new EventSource(`${API_BASE}/stream/${streamRunID}`);
+      eventSourceRef.current = es;
 
-    es.onmessage = (event) => {
-      try {
-        const agentEvent: AgentEvent = JSON.parse(event.data);
+      es.onmessage = (event) => {
+        try {
+          const agentEvent: AgentEvent = JSON.parse(event.data);
 
-        if (agentEvent.type === "replay.done") {
-          flushReplay();
-          return;
+          if (agentEvent.type === "replay.done") {
+            flushReplay();
+            return;
+          }
+
+          handleEvent(agentEvent);
+        } catch {
+          // Ignore malformed events
         }
+      };
 
-        handleEvent(agentEvent);
-      } catch {
-        // Ignore malformed events
+      es.onerror = () => {
+        sendingRef.current = false;
+        reconnectingRef.current = false;
+        replayingRef.current = false;
+        cleanup();
+        setIsLoading(false);
+      };
+    },
+    [handleEvent, flushReplay, cleanup],
+  );
+
+  const sendMessage = useCallback(
+    async (content: string) => {
+      if (!content.trim()) return;
+      if (sendingRef.current) {
+        setQueue((prev) => [...prev, content]);
+        return;
       }
-    };
+      sendingRef.current = true;
 
-    es.onerror = () => {
-      sendingRef.current = false;
-      reconnectingRef.current = false;
-      replayingRef.current = false;
-      cleanup();
-      setIsLoading(false);
-    };
-  }, [handleEvent, flushReplay, cleanup]);
-
-  const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim()) return;
-    if (sendingRef.current) {
-      setQueue(prev => [...prev, content]);
-      return;
-    }
-    sendingRef.current = true;
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content,
-      createdAt: new Date(),
-    };
-
-    const currentMessages = [...messages, userMessage];
-    setMessages(currentMessages);
-    setIsLoading(true);
-
-    try {
-      const abortController = new AbortController();
-      abortRef.current = abortController;
-
-      const response = await fetch(`${API_BASE}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: content,
-          chatID: chatID ?? undefined,
-          threadID: threadID ?? undefined,
-          model: model ?? undefined,
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Chat request failed: ${response.statusText}`);
-      }
-
-      const { runID: newRunID, threadID: newThreadID, chatID: newChatID } = await response.json();
-      setChatID(newChatID);
-      setRunID(newRunID);
-      setThreadID(newThreadID);
-
-      assistantIdRef.current = crypto.randomUUID();
-
-      const assistantMessage: Message = {
-        id: assistantIdRef.current,
-        role: "assistant",
-        content: "",
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content,
         createdAt: new Date(),
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
-      subscribeToStream(newRunID);
-    } catch (error) {
-      sendingRef.current = false;
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
+      const currentMessages = [...messages, userMessage];
+      setMessages(currentMessages);
+      setIsLoading(true);
+
+      try {
+        const abortController = new AbortController();
+        abortRef.current = abortController;
+
+        const response = await fetch(`${API_BASE}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: content,
+            chatID: chatID ?? undefined,
+            threadID: threadID ?? undefined,
+            model: model ?? undefined,
+          }),
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Chat request failed: ${response.statusText}`);
+        }
+
+        const {
+          runID: newRunID,
+          threadID: newThreadID,
+          chatID: newChatID,
+        } = await response.json();
+        setChatID(newChatID);
+        setRunID(newRunID);
+        setThreadID(newThreadID);
+
+        assistantIdRef.current = crypto.randomUUID();
+
+        const assistantMessage: Message = {
+          id: assistantIdRef.current,
+          role: "assistant",
+          content: "",
+          createdAt: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+        subscribeToStream(newRunID);
+      } catch (error) {
+        sendingRef.current = false;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        console.error("[useAgentChat] Error:", error);
+        cleanup();
+        setIsLoading(false);
       }
-      console.error("[useAgentChat] Error:", error);
-      cleanup();
-      setIsLoading(false);
-    }
-  }, [messages, chatID, threadID, model, cleanup, subscribeToStream]);
+    },
+    [messages, chatID, threadID, model, cleanup, subscribeToStream],
+  );
 
   // Check for an active run on mount (handles page refresh mid-stream)
   useEffect(() => {
-    if (!options.chatID || reconnectingRef.current || sendingRef.current) return;
+    if (!options.chatID || reconnectingRef.current || sendingRef.current)
+      return;
 
     let cancelled = false;
 
@@ -512,7 +600,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
   const resolveConfirmation = useCallback(
     async (confirmationID: string, approved: boolean, feedback?: string) => {
       const confirmation = pendingConfirmations.find(
-        (c) => c.confirmationID === confirmationID
+        (c) => c.confirmationID === confirmationID,
       );
       if (!confirmation) return;
 
@@ -523,22 +611,25 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChatRet
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ approved, feedback }),
-          }
+          },
         );
-        if (res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          resolved?: boolean;
+        } | null;
+        if (res.ok && data?.resolved) {
           setPendingConfirmations((prev) =>
-            prev.filter((c) => c.confirmationID !== confirmationID)
+            prev.filter((c) => c.confirmationID !== confirmationID),
           );
         }
       } catch (err) {
         console.error("[useAgentChat] Failed to resolve confirmation:", err);
       }
     },
-    [pendingConfirmations]
+    [pendingConfirmations],
   );
 
   const dismissFromQueue = useCallback((index: number) => {
-    setQueue(prev => prev.filter((_, i) => i !== index));
+    setQueue((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   // Dequeue next message when the current run completes

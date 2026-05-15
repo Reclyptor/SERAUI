@@ -28,11 +28,17 @@ export interface SkillDetail {
   license?: string;
   compatibility?: string;
   allowedTools: string[];
-  metadata: Record<string, string>;
+  metadata: Record<string, unknown>;
   files: SkillFile[];
+  seedHash?: string;
+  origin?: "seed" | "agent" | "user";
+  absorbedInto?: string;
   status: "active" | "stale" | "archived";
   lastUsedAt?: string;
   usageCount: number;
+  curatorNotes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 async function getCookieHeader(): Promise<string> {
@@ -83,7 +89,7 @@ export async function saveSkill(
     content?: string;
     description?: string;
     allowedTools?: string[];
-    metadata?: Record<string, string>;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<SkillDetail> {
   const cookieHeader = await getCookieHeader();

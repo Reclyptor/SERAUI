@@ -8,6 +8,7 @@ const API_PREFIX = "/api/v1";
 export interface PromptListItem {
   slug: string;
   extends?: string;
+  seedHash?: string;
   description?: string;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -17,9 +18,12 @@ export interface PromptListItem {
 export interface PromptDetail {
   slug: string;
   extends?: string;
+  seedHash?: string;
   content: string;
   description?: string;
   metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 async function getCookieHeader(): Promise<string> {

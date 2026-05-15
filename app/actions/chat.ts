@@ -31,7 +31,7 @@ export interface Message {
   thinking?: string;
   thinkingDuration?: number;
   toolCalls?: ToolCallBlock[];
-  createdAt?: Date;
+  createdAt?: string | Date;
 }
 
 export interface Chat {
@@ -59,7 +59,7 @@ async function getCookieHeader(): Promise<string> {
   if (allCookies.length === 0) {
     throw new Error("Not authenticated");
   }
-  return allCookies.map(c => `${c.name}=${c.value}`).join("; ");
+  return allCookies.map((c) => `${c.name}=${c.value}`).join("; ");
 }
 
 export async function getChats(): Promise<ChatListItem[]> {
@@ -152,16 +152,21 @@ export async function deleteChat(chatID: string): Promise<void> {
   }
 }
 
-export async function uploadImage(formData: FormData): Promise<{ imageID: string }> {
+export async function uploadImage(
+  formData: FormData,
+): Promise<{ imageID: string; mimeType: string }> {
   const cookieHeader = await getCookieHeader();
 
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/agent/upload-image`, {
-    method: "POST",
-    headers: {
-      Cookie: cookieHeader,
+  const response = await fetch(
+    `${API_BASE_URL}${API_PREFIX}/agent/upload-image`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookieHeader,
+      },
+      body: formData,
     },
-    body: formData,
-  });
+  );
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
