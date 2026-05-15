@@ -6,8 +6,9 @@ import clsx from "clsx";
 import { Loader2 } from "lucide-react";
 import { PromptsPanel } from "@/app/components/PromptsPanel";
 import { SkillsPanel } from "@/app/components/SkillsPanel";
+import { MemoriesPanel } from "@/app/components/MemoriesPanel";
 
-const TABS = ["prompts", "skills"] as const;
+const TABS = ["prompts", "skills", "memories"] as const;
 type Tab = (typeof TABS)[number];
 
 function ManageContent() {
@@ -38,7 +39,13 @@ function ManageContent() {
         ))}
       </div>
       <div className="flex-1 min-h-0">
-        {activeTab === "prompts" ? <PromptsPanel /> : <SkillsPanel />}
+        {activeTab === "prompts" ? (
+          <PromptsPanel />
+        ) : activeTab === "memories" ? (
+          <MemoriesPanel />
+        ) : (
+          <SkillsPanel />
+        )}
       </div>
     </div>
   );

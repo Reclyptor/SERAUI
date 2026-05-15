@@ -79,11 +79,12 @@ SERAUI is the Next.js frontend for the SERA agentic AI platform. It renders the 
     |   +-- layout.tsx                   # Sidebar + main flex container
     |   +-- new/page.tsx                 # Welcome view (no chatID)
     |   +-- chat/[chatID]/page.tsx       # Existing chat (server-loaded)
-    |   +-- manage/page.tsx              # Tabbed Manage page (prompts | skills)
+    |   +-- manage/page.tsx              # Tabbed Manage page (prompts | skills | memories)
     +-- actions/                         # Server actions ("use server")
     |   +-- chat.ts                      # Chat CRUD + image upload
     |   +-- prompts.ts                   # Prompt CRUD
     |   +-- skills.ts                    # Skill CRUD
+    |   +-- memories.ts                  # Memory list/delete
     +-- providers/                       # React provider components
     |   +-- SessionProvider/index.tsx    # Wraps next-auth/react SessionProvider
     |   +-- AuthProvider/index.tsx       # Redirect on unauth / refresh error; mounts ImageCacheProvider
@@ -106,6 +107,7 @@ SERAUI is the Next.js frontend for the SERA agentic AI platform. It renders the 
         +-- ImageUploadInput
         +-- Markdown
         +-- ModelSelector
+        +-- MemoriesPanel
         +-- PromptsPanel
         +-- SeraChat
         +-- Sidebar
@@ -158,7 +160,7 @@ SERAUI uses the App Router. All authenticated UI lives under the `(chat)` route 
 | `/`                       | `app/page.tsx`                        | Required | Server component; calls `redirect("/new")`                                                      |
 | `/new`                    | `app/(chat)/new/page.tsx`             | Required | Client component; mounts `<ChatContainer chatID={null} initialMessages={[]} />`                 |
 | `/chat/[chatID]`          | `app/(chat)/chat/[chatID]/page.tsx`   | Required | Server component; awaits `params`, server-fetches via `getChat`, redirects to `/new` on failure |
-| `/manage`                 | `app/(chat)/manage/page.tsx`          | Required | Client component; reads `?tab=` query (`prompts` \| `skills`), defaults to `prompts`            |
+| `/manage`                 | `app/(chat)/manage/page.tsx`          | Required | Client component; reads `?tab=` query (`prompts` \| `skills` \| `memories`), defaults to `prompts` |
 | `/api/auth/[...nextauth]` | `app/api/auth/[...nextauth]/route.ts` | Public   | Re-exports `GET` and `POST` from `lib/auth` `handlers`                                          |
 | `/health`                 | `app/health/route.ts`                 | Public   | `GET` only; returns `{ status: "ok" }` JSON                                                     |
 
@@ -179,7 +181,7 @@ The `ml-[48px]` offset accommodates the mobile sidebar's collapsed footprint; at
 
 ### Manage Tabs
 
-`/manage` renders a `<Suspense>` boundary (required because the page reads `useSearchParams`) around a tab strip that updates the URL via `router.replace`. Recognized tabs: `prompts` (default), `skills`. The active tab is computed as `(searchParams.get("tab") as Tab) ?? "prompts"`, which only handles the _missing_ case — when the query param is absent, the panel falls back to `prompts`. The render is then `activeTab === "prompts" ? <PromptsPanel /> : <SkillsPanel />`, so any non-`"prompts"` value (including unrecognized strings) renders the skills panel.
+`/manage` renders a `<Suspense>` boundary (required because the page reads `useSearchParams`) around a tab strip that updates the URL via `router.replace`. Recognized tabs: `prompts` (default), `skills`, `memories`. The active tab is computed as `(searchParams.get("tab") as Tab) ?? "prompts"`, which only handles the _missing_ case — when the query param is absent, the panel falls back to `prompts`. The render is a chained ternary: `prompts → PromptsPanel`, `memories → MemoriesPanel`, anything else (including unrecognized strings) → `SkillsPanel`.
 
 ### Post-send Navigation
 
@@ -505,6 +507,25 @@ interface SkillDetail {
 | `deleteSkill(name): void`            | DELETE | `/api/v1/skills/:name` | _(unused)_    |
 
 `saveSkill` body shape: `{ content?: string; description?: string; allowedTools?: string[]; metadata?: Record<string, unknown> }`. Name is URL-encoded.
+
+### 6.4 `app/actions/memories.ts`
+
+```ts
+interface MemoryEntry {
+  id: string;
+  content: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+```
+
+| Action                          | Method | SERA endpoint          | Used by         |
+| ------------------------------- | ------ | ---------------------- | --------------- |
+| `listMemories(): MemoryEntry[]` | GET    | `/api/v1/memories`     | `MemoriesPanel` |
+| `deleteMemory(id): void`        | DELETE | `/api/v1/memories/:id` | `MemoriesPanel` |
+
+No create/update action exists — memories are populated by the agent (manually via `save_memory` or automatically via Mem0's `extractAndStore`). Manual editing would invalidate the stored embedding, so the UI is read + delete only.
 
 ---
 
@@ -997,7 +1018,16 @@ Same master/detail pattern. Local state: `skills`, `selected`, `draftContent`, `
   - `archived` → muted foreground
 - **Detail** — separate inputs for description and content. `isDirty` requires either to differ from `selected`. After save, both drafts are reset from the response. The selected skill's bundled files are listed as read-only chips (paths only — content is not editable here).
 
-### 11.14 `Markdown`
+### 11.14 `MemoriesPanel`
+
+List-only panel (no detail view). Local state: `memories`, `loading`, `error`, `confirmingId`, `deletingId`.
+
+- **List** — each `MemoryRow` shows the full memory content (whitespace-preserved, wrapped), a relative timestamp (`just now`/`Nm`/`Nh`/`Nd ago`, falling back to `toLocaleDateString()` past a week), and every tag rendered as a small chip. Header shows a count next to the title once loaded.
+- **Delete** — trash icon appears on row hover. First click moves the row into `confirmingId` state, swapping the trash for a red check (confirm) + neutral X (cancel). Confirming sets `deletingId`, calls `deleteMemory`, and optimistically removes the row from local state. The check icon turns into a spinner during the in-flight delete.
+- No create/edit affordances — memory content lives as an embedding in Qdrant; editing the text without re-embedding would desync the vector from the source.
+- Empty state: "No memories found". Errors render as a red banner above the list.
+
+### 11.15 `Markdown`
 
 Renders Markdown via `ReactMarkdown` with:
 
@@ -1006,7 +1036,7 @@ Renders Markdown via `ReactMarkdown` with:
 - Default `className` chain: `prose prose-invert prose-sm` with custom `prose-*` overrides for spacing, code color (`#a4c639`, the accent), links (accent, underline-on-hover), code-block backgrounds (`#2d2a27`), and blockquote border (accent).
 - The `className` prop overrides the default entirely.
 
-### 11.15 `IconButton`
+### 11.16 `IconButton`
 
 Reusable 40×40 button with variants:
 
@@ -1018,7 +1048,7 @@ Reusable 40×40 button with variants:
 
 Forwards all native `<button>` props. Disabled state lowers opacity to 50% and removes the pointer cursor.
 
-### 11.16 `Icons`
+### 11.17 `Icons`
 
 Single module exporting hand-rolled SVG icons used in the chat surface (where `lucide-react` is intentionally avoided for tighter visual control):
 
@@ -1026,7 +1056,7 @@ Single module exporting hand-rolled SVG icons used in the chat surface (where `l
 
 All accept `className`; `ChevronIcon` adds `isOpen?: boolean`.
 
-### 11.17 `ImageThumbnail`
+### 11.18 `ImageThumbnail`
 
 Sized image card with optional remove button.
 
