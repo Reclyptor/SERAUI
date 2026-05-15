@@ -696,7 +696,27 @@ On `AbortError`, the catch path silently returns. Any other error logs and reset
 - `replay.done` triggers `flushReplay()`.
 - All other events are dispatched through `handleEvent(agentEvent)`.
 
-`onerror` clears all in-flight flags and `isLoading`. Malformed JSON is silently ignored.
+Every dispatched event updates `lastEventIDRef.current = event.streamID` if `streamID` is present. This cursor is what subsequent reconnect attempts use to resume without replaying from the start.
+
+On `onmessage`, the hook also clears `reconnectAttemptsRef.current = 0` — the first successful message after a transient drop tells us connectivity is healthy again.
+
+Malformed JSON is silently ignored.
+
+#### Resume-on-Error
+
+`onerror` does NOT immediately tear down. Instead it follows this state machine:
+
+1. Close the current `EventSource`.
+2. If the run already ended (`replayTerminalRef.current` is set, or the most recent dispatched event was terminal), give up and clear `isLoading`.
+3. If `reconnectAttemptsRef.current >= MAX_RECONNECTS` (5), give up and clear `isLoading`.
+4. Otherwise, schedule a retry via `setTimeout` with delay `Math.min(500 * 2 ** attempt, 8000)` (500ms → 1s → 2s → 4s → 8s, capped). Increment `reconnectAttemptsRef.current`.
+5. On retry fire, reopen `new EventSource(${API_BASE}/stream/${streamRunID}?last-event-id=${lastEventIDRef.current ?? '0'})` with `replay = true`. The query-param form is required because `EventSource` does not allow custom headers.
+
+Reconnect uses `replay = true` semantics: events arriving before the next `replay.done` accumulate in refs rather than mutating React state directly, then `flushReplay()` paints the missed delta in one render pass. This holds even if the server's replay buffer is empty (cursor past end-of-stream) — the server emits `replay.done` immediately and the tail resumes.
+
+The retry timer is held in `reconnectTimerRef` and cleared by `cleanup()`, `stopGeneration()`, and the chat-switch reset effect, so navigating away or cancelling abandons the retry cleanly.
+
+Terminal events (`run.completed` / `run.failed` / `run.cancelled`) reset both `reconnectAttemptsRef` and `lastEventIDRef` to their initial values.
 
 #### Replay vs. Live Mode
 
@@ -745,7 +765,9 @@ interface AgentEvent {
 }
 ```
 
-`streamID` is sent by SERA for replay/reconnection ordering but is currently not used by UI state updates.
+`streamID` is sent by SERA for replay/reconnection ordering. The hook stores the most recent `streamID` in `lastEventIDRef` and supplies it as `?last-event-id=<streamID>` on every resume attempt (see §9.3 Resume-on-Error). It is not otherwise used by UI state updates.
+
+SSE comment lines (`: ping <epoch>\n\n`) sent by SERA every 15s during idle stretches are absorbed silently by the browser's `EventSource` and never reach `onmessage`; they exist only to keep the socket warm.
 
 ### 10.2 Handled Event Types
 

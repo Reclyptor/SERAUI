@@ -5,6 +5,11 @@ import type { Attachment, Message, ToolCallBlock } from "@/app/actions/chat";
 import { getModelByID } from "@/app/lib/models";
 
 const API_BASE = "/api/v1/agent";
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BACKOFF_MIN_MS = 500;
+const RECONNECT_BACKOFF_MAX_MS = 8000;
+
+type StreamMode = "fresh" | "reconnect-mount" | "resume";
 
 export interface PendingConfirmation {
   confirmationID: string;
@@ -106,6 +111,12 @@ export function useAgentChat(
   const replayingRef = useRef(false);
   const replayConfirmationsRef = useRef<PendingConfirmation[]>([]);
   const replayTerminalRef = useRef<AgentEvent | null>(null);
+  const lastEventIDRef = useRef<string | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of pendingConfirmations for stale-closure-safe reads inside the
+  // long-lived stream callbacks (which can fire after retries delay them).
+  const pendingConfirmationsRef = useRef<PendingConfirmation[]>([]);
 
   const prevChatIDRef = useRef(options.chatID);
 
@@ -114,8 +125,18 @@ export function useAgentChat(
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
+    lastEventIDRef.current = null;
     abortRef.current = null;
   }, []);
+
+  useEffect(() => {
+    pendingConfirmationsRef.current = pendingConfirmations;
+  }, [pendingConfirmations]);
 
   // Reset all state when switching chats
   useEffect(() => {
@@ -448,30 +469,55 @@ export function useAgentChat(
   }, [updateAssistantMessage, handleEvent]);
 
   const subscribeToStream = useCallback(
-    (streamRunID: string, replay = false) => {
+    (streamRunID: string, mode: StreamMode = "fresh") => {
+      const isReplay = mode !== "fresh";
+      const preserveLiveState = mode === "resume";
+
       assistantIdRef.current = assistantIdRef.current || crypto.randomUUID();
-      assistantContentRef.current = "";
-      thinkingContentRef.current = "";
-      thinkingDoneRef.current = false;
-      thinkingStartTimeRef.current = null;
-      thinkingDurationRef.current = undefined;
-      toolCallsRef.current = [];
-      replayingRef.current = replay;
-      replayConfirmationsRef.current = [];
+
+      if (!preserveLiveState) {
+        assistantContentRef.current = "";
+        thinkingContentRef.current = "";
+        thinkingDoneRef.current = false;
+        thinkingStartTimeRef.current = null;
+        thinkingDurationRef.current = undefined;
+        toolCallsRef.current = [];
+        lastEventIDRef.current = null;
+        reconnectAttemptsRef.current = 0;
+      }
+      replayingRef.current = isReplay;
+      // On resume, seed the replay accumulator with the live set so missed
+      // adds/resolves apply on top — flushReplay replaces wholesale.
+      replayConfirmationsRef.current = preserveLiveState
+        ? [...pendingConfirmationsRef.current]
+        : [];
       replayTerminalRef.current = null;
 
       setIsLoading(true);
 
-      const es = new EventSource(`${API_BASE}/stream/${streamRunID}`);
+      const cursor = preserveLiveState ? (lastEventIDRef.current ?? "0") : "0";
+      const url =
+        cursor === "0"
+          ? `${API_BASE}/stream/${streamRunID}`
+          : `${API_BASE}/stream/${streamRunID}?last-event-id=${encodeURIComponent(cursor)}`;
+
+      const es = new EventSource(url);
       eventSourceRef.current = es;
 
       es.onmessage = (event) => {
         try {
           const agentEvent: AgentEvent = JSON.parse(event.data);
 
+          // Any message proves the socket is healthy — clear retry counter.
+          reconnectAttemptsRef.current = 0;
+
           if (agentEvent.type === "replay.done") {
             flushReplay();
             return;
+          }
+
+          if (agentEvent.streamID) {
+            lastEventIDRef.current = agentEvent.streamID;
           }
 
           handleEvent(agentEvent);
@@ -481,14 +527,46 @@ export function useAgentChat(
       };
 
       es.onerror = () => {
-        sendingRef.current = false;
-        reconnectingRef.current = false;
-        replayingRef.current = false;
-        cleanup();
-        setIsLoading(false);
+        // EventSource sets readyState to CONNECTING when the browser is
+        // attempting its own native reconnect. Defer to it; onerror will fire
+        // again with CLOSED if that gives up.
+        if (es.readyState !== EventSource.CLOSED) return;
+
+        if (eventSourceRef.current === es) {
+          eventSourceRef.current = null;
+        }
+        es.close();
+
+        // If the run already wrapped up via a terminal event, terminal-branch
+        // cleanup has already cleared these flags. Nothing to recover.
+        if (!sendingRef.current && !reconnectingRef.current) {
+          replayingRef.current = false;
+          setIsLoading(false);
+          return;
+        }
+
+        if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+          sendingRef.current = false;
+          reconnectingRef.current = false;
+          replayingRef.current = false;
+          setIsLoading(false);
+          return;
+        }
+
+        const attempt = reconnectAttemptsRef.current;
+        const delay = Math.min(
+          RECONNECT_BACKOFF_MIN_MS * 2 ** attempt,
+          RECONNECT_BACKOFF_MAX_MS,
+        );
+        reconnectAttemptsRef.current = attempt + 1;
+
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          subscribeToStream(streamRunID, "resume");
+        }, delay);
       };
     },
-    [handleEvent, flushReplay, cleanup],
+    [handleEvent, flushReplay],
   );
 
   const sendMessage = useCallback(
@@ -595,7 +673,7 @@ export function useAgentChat(
         };
         setMessages((prev) => [...prev, placeholder]);
 
-        subscribeToStream(data.runID, true);
+        subscribeToStream(data.runID, "reconnect-mount");
       })
       .catch(() => {});
 
