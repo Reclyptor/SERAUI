@@ -20,7 +20,7 @@
 10. [Streaming & Event Handling](#10-streaming--event-handling)
 11. [Component Catalog](#11-component-catalog)
 12. [Models](#12-models)
-13. [Image Handling](#13-image-handling)
+13. [Attachment Handling](#13-attachment-handling)
 14. [Styling & Theming](#14-styling--theming)
 15. [Build & Deployment](#15-build--deployment)
 
@@ -355,7 +355,7 @@ All server actions live under `app/actions/*` and start with `"use server"`. Eac
 2. Throws `"Not authenticated"` if the cookie store is empty.
 3. Calls SERA at `${SERA_API_URL}${API_PREFIX}${path}` where `API_PREFIX = "/api/v1"`.
 4. Uses `cache: "no-store"` for GETs.
-5. Throws a generic `Failed to <verb> <resource>: ${response.statusText}` error on non-OK responses. **Exception:** `uploadImage` first attempts to parse the response body as JSON and prefers a `message` field if present, otherwise falls back to `"Failed to upload image"`.
+5. Throws a generic `Failed to <verb> <resource>: ${response.statusText}` error on non-OK responses. **Exception:** `uploadAttachment` first attempts to parse the response body as JSON and prefers a `message` field if present, otherwise falls back to `"Failed to upload attachment"`.
 
 ### 6.1 `app/actions/chat.ts`
 
@@ -378,6 +378,14 @@ interface ToolCallBlock {
   isSubagent?: boolean;
   subagentMeta?: SubagentMeta;
 }
+interface Attachment {
+  id: string;
+  kind: "image" | "file";
+  mimeType: string;
+  size: number;
+  filename?: string;
+  createdAt: string;
+}
 interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -385,6 +393,7 @@ interface Message {
   thinking?: string;
   thinkingDuration?: number;
   toolCalls?: ToolCallBlock[];
+  attachments?: Attachment[];
   createdAt?: string | Date; // SERA serializes stored dates as ISO strings; local optimistic messages use Date
 }
 interface Chat {
@@ -406,16 +415,16 @@ interface ChatListItem {
 }
 ```
 
-| Action                                                         | Method | SERA endpoint                | Used by                                  |
-| -------------------------------------------------------------- | ------ | ---------------------------- | ---------------------------------------- |
-| `getChats(): ChatListItem[]`                                   | GET    | `/api/v1/chats`              | `ChatContext.refreshChats`               |
-| `getChat(chatID): Chat`                                        | GET    | `/api/v1/chats/:id`          | `app/(chat)/chat/[chatID]/page.tsx`      |
-| `createChat(messages): Chat`                                   | POST   | `/api/v1/chats`              | _(currently unused by the UI; exported)_ |
-| `updateChat(chatID, messages): Chat`                           | PATCH  | `/api/v1/chats/:id`          | _(currently unused by the UI; exported)_ |
-| `deleteChat(chatID): void`                                     | DELETE | `/api/v1/chats/:id`          | _(currently unused by the UI; exported)_ |
-| `uploadImage(formData): { imageID: string; mimeType: string }` | POST   | `/api/v1/agent/upload-image` | `ImageUploadInput`                       |
+| Action                                   | Method | SERA endpoint               | Used by                                  |
+| ---------------------------------------- | ------ | --------------------------- | ---------------------------------------- |
+| `getChats(): ChatListItem[]`             | GET    | `/api/v1/chats`             | `ChatContext.refreshChats`               |
+| `getChat(chatID): Chat`                  | GET    | `/api/v1/chats/:id`         | `app/(chat)/chat/[chatID]/page.tsx`      |
+| `createChat(messages): Chat`             | POST   | `/api/v1/chats`             | _(currently unused by the UI; exported)_ |
+| `updateChat(chatID, messages): Chat`     | PATCH  | `/api/v1/chats/:id`         | _(currently unused by the UI; exported)_ |
+| `deleteChat(chatID): void`               | DELETE | `/api/v1/chats/:id`         | _(currently unused by the UI; exported)_ |
+| `uploadAttachment(formData): Attachment` | POST   | `/api/v1/agent/attachments` | `ImageUploadInput`                       |
 
-Note: `uploadImage` is invoked as a server action with cookie forwarding directly to SERA, not via the browser proxy rewrite. The UI stores the returned `mimeType` alongside the local preview so the client cache matches the backend's accepted content type.
+Note: `uploadAttachment` is invoked as a server action with cookie forwarding directly to SERA, not via the browser proxy rewrite. The multipart field name is `file`. The UI stores returned image attachment IDs alongside local previews, while durable bytes are fetched from `/api/v1/agent/attachments/:id/content` on reload.
 
 ### 6.2 `app/actions/prompts.ts`
 
@@ -571,7 +580,7 @@ interface ImageCacheContextType {
 
 Storage is a `Map<string, CachedImage>` held in `useState`. `clearOldImages()` is a memory ceiling, not a TTL — it uses a functional state update and, when the latest map exceeds 50 entries, slices to the most recent 50 by insertion order (via `Array.from(prev.entries()).slice(-50)`). Throws if used outside the provider.
 
-Consumers: `ImageUploadInput` (writes on send, calls `clearOldImages` after batch upload) and `ChatMessage` user variant (reads when rendering `[IMG:<id>]` markers).
+Consumers: `ImageUploadInput` (writes image previews on send, calls `clearOldImages` after batch upload) and `ChatMessage` user variant (reads previews when rendering image attachments).
 
 ---
 
@@ -625,10 +634,10 @@ interface UseAgentChatReturn {
   runID: string | null;
   model: string | null;
   setModel: (model: string) => void;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   stopGeneration: () => void;
   setMessages: (messages: Message[]) => void;
-  queue: string[]; // Pending user messages (sent while a run is active)
+  queue: string[]; // Display labels for pending user messages
   dismissFromQueue: (index: number) => void;
   pendingConfirmations: PendingConfirmation[];
   resolveConfirmation: (
@@ -670,10 +679,10 @@ This effect is what makes navigation from `/chat/A` → `/chat/B` cleanly load B
 
 #### Send Flow
 
-1. If content is empty, return.
-2. If a send is already in flight (`sendingRef.current`), push onto `queue` and return.
-3. Mark sending, append a user message, set `isLoading = true`.
-4. `POST ${API_BASE}/chat` with body `{ message, chatID?, threadID?, model? }`.
+1. If content is empty and there are no attachments, return.
+2. If a send is already in flight (`sendingRef.current`), push `{ content, attachments }` onto the internal queue and return. The returned `queue` array maps those entries to display text only.
+3. Mark sending, append an optimistic user message with `attachments`, set `isLoading = true`.
+4. `POST ${API_BASE}/chat` with body `{ message, attachmentIDs, chatID?, threadID?, model? }`.
 5. Read `{ runID, threadID, chatID }` from the JSON response. Store all three.
 6. Append a blank assistant message with a new id (`crypto.randomUUID()`).
 7. Call `subscribeToStream(newRunID)`.
@@ -711,7 +720,7 @@ When the hook mounts with `options.chatID` set and is not currently sending or r
 
 #### Queue Drain
 
-An effect monitors `!isLoading && queue.length > 0 && !sendingRef.current`. It shifts the head of the queue and re-invokes `sendMessage(next)`. `dismissFromQueue(index)` removes a single entry by index.
+An effect monitors `!isLoading && queue.length > 0 && !sendingRef.current`. It shifts the head of the internal queue and re-invokes `sendMessage(next.content, next.attachments)`. `dismissFromQueue(index)` removes a single entry by index.
 
 #### Stop Generation
 
@@ -812,9 +821,9 @@ Routes by lowercased role:
 
 #### `UserMessage`
 
-- Extracts image markers from `content` using `/\[IMG:([a-f0-9-]+)\]/g`. The regex requires lowercase hex (the IDs minted by SERA are lowercased UUIDs).
-- Renders an `<ImageThumbnail size="lg">` for each cached image and the cleaned text inside a right-aligned bubble.
-- Reads previews from `ImageCacheContext.getImage`. If a marker has no cached preview (e.g., new tab, page refresh), the thumbnail is omitted; the text fallback `cleanText` still renders.
+- Renders `message.attachments` separately from `message.content`; text is not parsed for attachment markers.
+- Image attachments render as `<ImageThumbnail size="lg">`. Cached local previews are preferred, otherwise the thumbnail source is `/api/v1/agent/attachments/:id/content`.
+- Non-image file attachments render as authenticated links to `/api/v1/agent/attachments/:id/content`.
 
 #### `AssistantMessage`
 
@@ -892,14 +901,14 @@ The "live" input bar. Props:
 
 Features:
 
-- **Drag & drop and file picker** — the browser picker allows `image/*`, and `handleFiles` filters to SERA-supported JPEG, PNG, GIF, and WebP files up to 5 MB before creating previews. Each preview gets a `crypto.randomUUID()` local id (distinct from the SERA-issued image id assigned on upload).
-- **Upload sequencing** — on send, every selected file is uploaded **concurrently**. Each `{ imageID, mimeType }` returned by SERA is registered with `ImageCacheContext.addImage(imageID, preview, mimeType)` inside the same callback so future renders can find the local preview.
-- **Markers** — uploaded image IDs are formatted as `[IMG:<id>]` (space-joined when multiple) and appended to the message text. If the user typed no text but selected images, the default message is `"Analyze this image"`.
+- **Drag & drop and file picker** — accepts arbitrary files up to 25 MB. Image files get local data-URL previews; non-image files render as compact filename chips.
+- **Upload sequencing** — on send, every selected file is uploaded **concurrently** to SERA via `uploadAttachment`. Returned `Attachment` objects are passed to `useAgentChat.sendMessage`, and image previews are registered with `ImageCacheContext.addImage(attachment.id, preview, mimeType)`.
+- **Attachment IDs** — uploaded attachment IDs are sent in the chat request body as `attachmentIDs`; they are not embedded into message text.
 - **Queue display** — when `queue.length > 0`, a stack of "Queued: ..." chips with per-row dismiss buttons appears above the input.
 - **Stop vs send** — when `inProgress` is true, both stop (red) and send (accent) buttons are visible; send becomes "Queue message" semantically.
-- **Drop zone** — `isDragging` adds a dashed accent ring around the input and a centered "Drop images here" overlay.
+- **Drop zone** — `isDragging` adds a dashed accent ring around the input and a centered "Drop files here" overlay.
 - **Textarea autosize** — `onInput` resizes height to `min(scrollHeight, 200px)`. Enter sends; Shift+Enter inserts a newline.
-- **Placeholders** — `"Drop images here..."` when dragging, `"Uploading images..."` when uploading, `"Queue a message..."` when `inProgress`, otherwise `"Reply..."`.
+- **Placeholders** — `"Drop files here..."` when dragging, `"Uploading files..."` when uploading, `"Queue a message..."` when `inProgress`, otherwise `"Reply..."`.
 - **Autofocus** — the textarea is `autoFocus`.
 
 ### 11.9 `WelcomeView`
@@ -1049,23 +1058,23 @@ Persistence: the most recent model is mirrored to `localStorage["sera:lastModel"
 
 ---
 
-## 13. Image Handling
+## 13. Attachment Handling
 
 ### 13.1 Lifecycle
 
-1. **Local preview** — `ImageUploadInput.handleFiles` reads each file with `FileReader.readAsDataURL`, mints a local UUID, and stores `{ id, file, preview }` in component state.
-2. **Upload** — On submit, each file is sent to SERA via the `uploadImage` server action (`POST /api/v1/agent/upload-image`, multipart `image` field). SERA returns `{ imageID, mimeType }`; the UI keeps both values.
-3. **Cache** — Each `imageID` is paired with the local data-URL preview and SERA-returned `mimeType` in `ImageCacheContext.addImage(id, preview, mimeType)`.
-4. **Markers** — `[IMG:<imageID>]` strings are appended to the message text (space-separated when multiple). SERA leaves markers in stored chat text but resolves user-role string markers into AI SDK image content parts immediately before model calls. If an image has expired or cannot be found, SERA sends `[Image unavailable: <imageID>]` as text to the model.
-5. **Trim** — After every batch, `clearOldImages()` keeps the map at ≤50 entries (insertion-order LRU).
+1. **Local preview** — `ImageUploadInput.handleFiles` mints a local UUID for each selected file. Images are read with `FileReader.readAsDataURL`; non-image files keep an empty preview and display as filename chips.
+2. **Upload** — On submit, each file is sent to SERA via the `uploadAttachment` server action (`POST /api/v1/agent/attachments`, multipart `file` field). SERA returns an `Attachment`.
+3. **Cache** — Image `Attachment.id` values are paired with local data-URL previews and SERA-returned `mimeType` in `ImageCacheContext.addImage(id, preview, mimeType)`.
+4. **Chat request** — `useAgentChat.sendMessage` sends text plus `attachmentIDs: attachments.map(a => a.id)` in the `/api/v1/agent/chat` JSON body. The optimistic user `Message` stores the full `attachments` array for immediate rendering.
+5. **Trim** — After every batch, `clearOldImages()` keeps the preview map at ≤50 entries (insertion-order LRU).
 
 ### 13.2 Display
 
-`UserMessage` matches `[IMG:<id>]` against `ImageCacheContext.getImage(id)`. When a hit exists, the preview renders as a `lg` thumbnail; when missing (page refreshed mid-conversation, new tab, etc.), the marker is simply stripped from the displayed text and no thumbnail appears.
+`UserMessage` renders `message.attachments` directly. Image attachments prefer a cached preview and fall back to `/api/v1/agent/attachments/:id/content`; file attachments render as links to the same authenticated content endpoint.
 
 ### 13.3 Constraints
 
-The UI filters selected files before upload to match SERA's constraints: JPEG, PNG, GIF, and WebP only, max 5 MB per file. SERA repeats the same validation server-side; the server action surfaces any 4xx/5xx as a thrown error message that bubbles into a `console.error`.
+The UI filters selected files before upload to match SERA's default max size of 25 MB per file. SERA repeats size validation server-side through `OBJECT_STORAGE_MAX_UPLOAD_BYTES`; the server action surfaces any 4xx/5xx as a thrown error message that bubbles into a `console.error`.
 
 ---
 

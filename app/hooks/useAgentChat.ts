@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { Message, ToolCallBlock } from "@/app/actions/chat";
+import type { Attachment, Message, ToolCallBlock } from "@/app/actions/chat";
 import { getModelByID } from "@/app/lib/models";
 
 const API_BASE = "/api/v1/agent";
@@ -38,7 +38,7 @@ interface UseAgentChatReturn {
   runID: string | null;
   model: string | null;
   setModel: (model: string) => void;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   stopGeneration: () => void;
   setMessages: (messages: Message[]) => void;
   queue: string[];
@@ -49,6 +49,11 @@ interface UseAgentChatReturn {
     approved: boolean,
     feedback?: string,
   ) => Promise<void>;
+}
+
+interface QueuedMessage {
+  content: string;
+  attachments?: Attachment[];
 }
 
 export function useAgentChat(
@@ -82,7 +87,7 @@ export function useAgentChat(
     setModelState(value);
     localStorage.setItem("sera:lastModel", value);
   }, []);
-  const [queue, setQueue] = useState<string[]>([]);
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [pendingConfirmations, setPendingConfirmations] = useState<
     PendingConfirmation[]
   >([]);
@@ -487,10 +492,10 @@ export function useAgentChat(
   );
 
   const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim()) return;
+    async (content: string, attachments: Attachment[] = []) => {
+      if (!content.trim() && attachments.length === 0) return;
       if (sendingRef.current) {
-        setQueue((prev) => [...prev, content]);
+        setQueue((prev) => [...prev, { content, attachments }]);
         return;
       }
       sendingRef.current = true;
@@ -499,6 +504,7 @@ export function useAgentChat(
         id: crypto.randomUUID(),
         role: "user",
         content,
+        attachments,
         createdAt: new Date(),
       };
 
@@ -515,6 +521,7 @@ export function useAgentChat(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: content,
+            attachmentIDs: attachments.map((attachment) => attachment.id),
             chatID: chatID ?? undefined,
             threadID: threadID ?? undefined,
             model: model ?? undefined,
@@ -637,7 +644,7 @@ export function useAgentChat(
     if (!isLoading && queue.length > 0 && !sendingRef.current) {
       const [next, ...rest] = queue;
       setQueue(rest);
-      sendMessage(next);
+      sendMessage(next.content, next.attachments);
     }
   }, [isLoading, queue, sendMessage]);
 
@@ -652,7 +659,7 @@ export function useAgentChat(
     sendMessage,
     stopGeneration,
     setMessages,
-    queue,
+    queue: queue.map((item) => item.content),
     dismissFromQueue,
     pendingConfirmations,
     resolveConfirmation,

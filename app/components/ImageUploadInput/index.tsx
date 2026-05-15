@@ -6,19 +6,16 @@ import { useImageCache } from "../../contexts/ImageCacheContext";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
-import { uploadImage as uploadImageAction } from "@/app/actions/chat";
+import {
+  uploadAttachment as uploadAttachmentAction,
+  type Attachment,
+} from "@/app/actions/chat";
 
-const ACCEPTED_IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-]);
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
 
 interface ImageUploadInputProps {
   inProgress: boolean;
-  onSend: (text: string) => Promise<void>;
+  onSend: (text: string, attachments?: Attachment[]) => Promise<void>;
   onStop?: () => void;
   queue: string[];
   onDismissFromQueue: (index: number) => void;
@@ -36,7 +33,7 @@ export function ImageUploadInput({
   onModelChange,
 }: ImageUploadInputProps) {
   const [message, setMessage] = useState("");
-  const [images, setImages] = useState<
+  const [attachments, setAttachments] = useState<
     Array<{ id: string; file: File; preview: string }>
   >([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -57,25 +54,21 @@ export function ImageUploadInput({
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
 
-    const imageFiles = Array.from(files).filter((file) => {
-      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+    const acceptedFiles = Array.from(files).filter((file) => {
+      if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
         console.error(
-          `[ImageUploadInput] Unsupported image type: ${file.type || file.name}`,
-        );
-        return false;
-      }
-      if (file.size > MAX_IMAGE_SIZE_BYTES) {
-        console.error(
-          `[ImageUploadInput] Image too large: ${file.name} exceeds 5MB`,
+          `[ImageUploadInput] Attachment too large: ${file.name} exceeds 25MB`,
         );
         return false;
       }
       return true;
     });
 
-    const newImages = await Promise.all(
-      imageFiles.map(async (file) => {
-        const preview = await createPreview(file);
+    const newAttachments = await Promise.all(
+      acceptedFiles.map(async (file) => {
+        const preview = file.type.startsWith("image/")
+          ? await createPreview(file)
+          : "";
         return {
           id: crypto.randomUUID(),
           file,
@@ -84,7 +77,7 @@ export function ImageUploadInput({
       }),
     );
 
-    setImages((prev) => [...prev, ...newImages]);
+    setAttachments((prev) => [...prev, ...newAttachments]);
   };
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -106,50 +99,44 @@ export function ImageUploadInput({
     setIsDragging(false);
   };
 
-  const removeImage = (index: number) => {
-    setImages((prev) => prev.filter((_, i) => i !== index));
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const uploadImage = async (
-    file: File,
-  ): Promise<{ imageID: string; mimeType: string }> => {
+  const uploadAttachment = async (file: File): Promise<Attachment> => {
     const formData = new FormData();
-    formData.append("image", file);
-    return uploadImageAction(formData);
+    formData.append("file", file);
+    return uploadAttachmentAction(formData);
   };
 
   const handleSubmit = async () => {
     if (uploading) return;
-    if (!message.trim() && images.length === 0) return;
+    if (!message.trim() && attachments.length === 0) return;
 
-    const userMessage = message || "Analyze this image";
+    const userMessage = message || "Analyze the attached files";
 
     try {
       setUploading(true);
 
-      const imageIDs = await Promise.all(
-        images.map(async (img) => {
-          const uploaded = await uploadImage(img.file);
-          addImage(uploaded.imageID, img.preview, uploaded.mimeType);
-          return uploaded.imageID;
+      const uploadedAttachments = await Promise.all(
+        attachments.map(async (item) => {
+          const uploaded = await uploadAttachment(item.file);
+          if (uploaded.kind === "image" && item.preview) {
+            addImage(uploaded.id, item.preview, uploaded.mimeType);
+          }
+          return uploaded;
         }),
       );
 
       clearOldImages();
 
-      let finalMessage = userMessage;
-      if (imageIDs.length > 0) {
-        const imageMarkers = imageIDs.map((id) => `[IMG:${id}]`).join(" ");
-        finalMessage = `${userMessage} ${imageMarkers}`;
-      }
-
       setMessage("");
-      setImages([]);
+      setAttachments([]);
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
 
-      await onSend(finalMessage);
+      await onSend(userMessage, uploadedAttachments);
     } catch (error) {
       console.error("Failed to send message:", error);
       const errorMessage =
@@ -175,7 +162,7 @@ export function ImageUploadInput({
     target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
   };
 
-  const canSend = message.trim() || images.length > 0;
+  const canSend = message.trim() || attachments.length > 0;
 
   const actionButtonBase =
     "w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
@@ -212,23 +199,41 @@ export function ImageUploadInput({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
           multiple
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
 
-        {images.length > 0 && (
+        {attachments.length > 0 && (
           <div className="flex gap-2 px-4 pt-4 flex-wrap">
-            {images.map((image, index) => (
-              <ImageThumbnail
-                key={image.id}
-                src={image.preview}
-                alt={image.file.name}
-                onRemove={() => removeImage(index)}
-                disabled={uploading}
-              />
-            ))}
+            {attachments.map((attachment, index) =>
+              attachment.preview ? (
+                <ImageThumbnail
+                  key={attachment.id}
+                  src={attachment.preview}
+                  alt={attachment.file.name}
+                  onRemove={() => removeAttachment(index)}
+                  disabled={uploading}
+                />
+              ) : (
+                <div
+                  key={attachment.id}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background-tertiary px-3 py-2 text-xs text-foreground"
+                >
+                  <span className="max-w-40 truncate">
+                    {attachment.file.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(index)}
+                    disabled={uploading}
+                    className="text-foreground-muted hover:text-foreground disabled:opacity-50"
+                  >
+                    x
+                  </button>
+                </div>
+              ),
+            )}
           </div>
         )}
 
@@ -240,9 +245,9 @@ export function ImageUploadInput({
           onInput={handleInput}
           placeholder={
             isDragging
-              ? "Drop images here..."
+              ? "Drop files here..."
               : uploading
-                ? "Uploading images..."
+                ? "Uploading files..."
                 : inProgress
                   ? "Queue a message..."
                   : "Reply..."

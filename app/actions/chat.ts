@@ -24,6 +24,15 @@ export interface ToolCallBlock {
   subagentMeta?: SubagentMeta;
 }
 
+export interface Attachment {
+  id: string;
+  kind: "image" | "file";
+  mimeType: string;
+  size: number;
+  filename?: string;
+  createdAt: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -31,6 +40,7 @@ export interface Message {
   thinking?: string;
   thinkingDuration?: number;
   toolCalls?: ToolCallBlock[];
+  attachments?: Attachment[];
   createdAt?: string | Date;
 }
 
@@ -152,13 +162,13 @@ export async function deleteChat(chatID: string): Promise<void> {
   }
 }
 
-export async function uploadImage(
+export async function uploadAttachment(
   formData: FormData,
-): Promise<{ imageID: string; mimeType: string }> {
+): Promise<Attachment> {
   const cookieHeader = await getCookieHeader();
 
   const response = await fetch(
-    `${API_BASE_URL}${API_PREFIX}/agent/upload-image`,
+    `${API_BASE_URL}${API_PREFIX}/agent/attachments`,
     {
       method: "POST",
       headers: {
@@ -170,7 +180,7 @@ export async function uploadImage(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || "Failed to upload image");
+    throw new Error(error.message || "Failed to upload attachment");
   }
 
   return response.json();

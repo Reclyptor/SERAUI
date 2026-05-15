@@ -5,7 +5,7 @@ import { ToolCallMessage } from "../ToolCallMessage";
 import { SubagentMessage } from "../SubagentMessage";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { useImageCache } from "../../contexts/ImageCacheContext";
-import type { Message } from "@/app/actions/chat";
+import type { Attachment, Message } from "@/app/actions/chat";
 
 interface ChatMessageProps {
   message: Message;
@@ -13,7 +13,11 @@ interface ChatMessageProps {
   isLatestAssistant?: boolean;
 }
 
-export function ChatMessage({ message, isLoading, isLatestAssistant }: ChatMessageProps) {
+export function ChatMessage({
+  message,
+  isLoading,
+  isLatestAssistant,
+}: ChatMessageProps) {
   const role = (message.role || "").toLowerCase();
 
   if (role === "user") {
@@ -21,7 +25,13 @@ export function ChatMessage({ message, isLoading, isLatestAssistant }: ChatMessa
   }
 
   if (role === "assistant") {
-    return <AssistantMessage message={message} isLoading={isLoading} isLatest={isLatestAssistant} />;
+    return (
+      <AssistantMessage
+        message={message}
+        isLoading={isLoading}
+        isLatest={isLatestAssistant}
+      />
+    );
   }
 
   return null;
@@ -30,36 +40,58 @@ export function ChatMessage({ message, isLoading, isLatestAssistant }: ChatMessa
 function UserMessage({ message }: { message: Message }) {
   const content = message.content || "";
   const { getImage } = useImageCache();
-
-  const imageIDRegex = /\[IMG:([a-f0-9-]+)\]/g;
-  const imageIDs = Array.from(
-    content.matchAll(imageIDRegex) as IterableIterator<RegExpMatchArray>
-  ).map((m) => m[1]);
-  const cleanText = content.replace(imageIDRegex, "").trim();
+  const attachments = message.attachments ?? [];
 
   return (
     <div className="py-4 max-w-[672px] mx-auto w-full">
       <div className="flex justify-end">
         <div className="bg-background-tertiary text-foreground rounded-2xl px-4 py-2 max-w-[80%] whitespace-pre-wrap">
-          {imageIDs.length > 0 && (
+          {attachments.length > 0 && (
             <div className="flex gap-2 flex-wrap mb-2">
-              {imageIDs.map((id) => {
-                const cached = getImage(id);
-                return cached ? (
-                  <ImageThumbnail
-                    key={id}
-                    src={cached.preview}
-                    alt="Uploaded"
-                    size="lg"
-                  />
-                ) : null;
-              })}
+              {attachments.map((attachment) => (
+                <AttachmentPreview
+                  key={attachment.id}
+                  attachment={attachment}
+                  cachedPreview={getImage(attachment.id)?.preview}
+                />
+              ))}
             </div>
           )}
-          {cleanText}
+          {content}
         </div>
       </div>
     </div>
+  );
+}
+
+function AttachmentPreview({
+  attachment,
+  cachedPreview,
+}: {
+  attachment: Attachment;
+  cachedPreview?: string;
+}) {
+  if (attachment.kind === "image") {
+    return (
+      <ImageThumbnail
+        src={
+          cachedPreview ?? `/api/v1/agent/attachments/${attachment.id}/content`
+        }
+        alt={attachment.filename ?? "Uploaded image"}
+        size="lg"
+      />
+    );
+  }
+
+  return (
+    <a
+      href={`/api/v1/agent/attachments/${attachment.id}/content`}
+      target="_blank"
+      rel="noreferrer"
+      className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground hover:border-foreground-muted"
+    >
+      {attachment.filename ?? "Attachment"}
+    </a>
   );
 }
 
@@ -88,10 +120,18 @@ function AssistantMessage({
           <div className="mt-1 mb-4">
             {toolCalls.map((tc) =>
               tc.isSubagent ? (
-                <SubagentMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
+                <SubagentMessage
+                  key={tc.toolCallID}
+                  toolCall={tc}
+                  isLatest={isLatest}
+                />
               ) : (
-                <ToolCallMessage key={tc.toolCallID} toolCall={tc} isLatest={isLatest} />
-              )
+                <ToolCallMessage
+                  key={tc.toolCallID}
+                  toolCall={tc}
+                  isLatest={isLatest}
+                />
+              ),
             )}
           </div>
         )}
