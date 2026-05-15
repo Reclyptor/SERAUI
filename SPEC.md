@@ -1074,7 +1074,7 @@ Persistence: the most recent model is mirrored to `localStorage["sera:lastModel"
 
 ### 13.3 Constraints
 
-The UI filters selected files before upload to match SERA's default max size of 25 MB per file. SERA repeats size validation server-side through `OBJECT_STORAGE_MAX_UPLOAD_BYTES`; the server action surfaces any 4xx/5xx as a thrown error message that bubbles into a `console.error`.
+The UI filters selected files before upload to match SERA's default max size of 25 MB per file. SERA repeats the same size validation server-side; the server action surfaces any 4xx/5xx as a thrown error message that bubbles into a `console.error`.
 
 ---
 
