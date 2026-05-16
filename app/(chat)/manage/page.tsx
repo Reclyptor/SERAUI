@@ -7,14 +7,36 @@ import { Loader2 } from "lucide-react";
 import { PromptsPanel } from "@/app/components/PromptsPanel";
 import { SkillsPanel } from "@/app/components/SkillsPanel";
 import { MemoriesPanel } from "@/app/components/MemoriesPanel";
+import { AgentsPanel } from "@/app/components/AgentsPanel";
+import { HeartbeatsPanel } from "@/app/components/HeartbeatsPanel";
+import { CronsPanel } from "@/app/components/CronsPanel";
 
-const TABS = ["prompts", "skills", "memories"] as const;
+const TABS = [
+  "prompts",
+  "skills",
+  "memories",
+  "agents",
+  "heartbeats",
+  "crons",
+] as const;
 type Tab = (typeof TABS)[number];
+
+const PANELS: Record<Tab, React.ComponentType> = {
+  prompts: PromptsPanel,
+  skills: SkillsPanel,
+  memories: MemoriesPanel,
+  agents: AgentsPanel,
+  heartbeats: HeartbeatsPanel,
+  crons: CronsPanel,
+};
 
 function ManageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const activeTab = (searchParams.get("tab") as Tab) ?? "prompts";
+  const requestedTab = searchParams.get("tab") as Tab | null;
+  const activeTab: Tab =
+    requestedTab && TABS.includes(requestedTab) ? requestedTab : "prompts";
+  const ActivePanel = PANELS[activeTab];
 
   const setTab = (tab: Tab) => {
     router.replace(`/manage?tab=${tab}`);
@@ -39,13 +61,7 @@ function ManageContent() {
         ))}
       </div>
       <div className="flex-1 min-h-0">
-        {activeTab === "prompts" ? (
-          <PromptsPanel />
-        ) : activeTab === "memories" ? (
-          <MemoriesPanel />
-        ) : (
-          <SkillsPanel />
-        )}
+        <ActivePanel />
       </div>
     </div>
   );

@@ -79,12 +79,15 @@ SERAUI is the Next.js frontend for the SERA agentic AI platform. It renders the 
     |   +-- layout.tsx                   # Sidebar + main flex container
     |   +-- new/page.tsx                 # Welcome view (no chatID)
     |   +-- chat/[chatID]/page.tsx       # Existing chat (server-loaded)
-    |   +-- manage/page.tsx              # Tabbed Manage page (prompts | skills | memories)
+    |   +-- manage/page.tsx              # Tabbed Manage page (prompts | skills | memories | agents | heartbeats | crons)
     +-- actions/                         # Server actions ("use server")
     |   +-- chat.ts                      # Chat CRUD + image upload
     |   +-- prompts.ts                   # Prompt CRUD
     |   +-- skills.ts                    # Skill CRUD
     |   +-- memories.ts                  # Memory list/delete
+    |   +-- agents.ts                    # Agent CRUD
+    |   +-- heartbeats.ts                # Heartbeat config CRUD
+    |   +-- crons.ts                     # Cron job CRUD
     +-- providers/                       # React provider components
     |   +-- SessionProvider/index.tsx    # Wraps next-auth/react SessionProvider
     |   +-- AuthProvider/index.tsx       # Redirect on unauth / refresh error; mounts ImageCacheProvider
@@ -98,9 +101,12 @@ SERAUI is the Next.js frontend for the SERA agentic AI platform. It renders the 
     +-- lib/                             # Client-safe shared library code
     |   +-- models.ts                    # Model registry, defaults, grouping helpers
     +-- components/                      # All UI components (each in `<Name>/index.tsx`)
+        +-- AgentsPanel
         +-- ChatContainer
         +-- ChatMessage
         +-- ConfirmationCard
+        +-- CronsPanel
+        +-- HeartbeatsPanel
         +-- IconButton
         +-- Icons
         +-- ImageThumbnail
@@ -160,7 +166,7 @@ SERAUI uses the App Router. All authenticated UI lives under the `(chat)` route 
 | `/`                       | `app/page.tsx`                        | Required | Server component; calls `redirect("/new")`                                                      |
 | `/new`                    | `app/(chat)/new/page.tsx`             | Required | Client component; mounts `<ChatContainer chatID={null} initialMessages={[]} />`                 |
 | `/chat/[chatID]`          | `app/(chat)/chat/[chatID]/page.tsx`   | Required | Server component; awaits `params`, server-fetches via `getChat`, redirects to `/new` on failure |
-| `/manage`                 | `app/(chat)/manage/page.tsx`          | Required | Client component; reads `?tab=` query (`prompts` \| `skills` \| `memories`), defaults to `prompts` |
+| `/manage`                 | `app/(chat)/manage/page.tsx`          | Required | Client component; reads `?tab=` query (`prompts` \| `skills` \| `memories` \| `agents` \| `heartbeats` \| `crons`), defaults to `prompts` |
 | `/api/auth/[...nextauth]` | `app/api/auth/[...nextauth]/route.ts` | Public   | Re-exports `GET` and `POST` from `lib/auth` `handlers`                                          |
 | `/health`                 | `app/health/route.ts`                 | Public   | `GET` only; returns `{ status: "ok" }` JSON                                                     |
 
@@ -181,7 +187,7 @@ The `ml-[48px]` offset accommodates the mobile sidebar's collapsed footprint; at
 
 ### Manage Tabs
 
-`/manage` renders a `<Suspense>` boundary (required because the page reads `useSearchParams`) around a tab strip that updates the URL via `router.replace`. Recognized tabs: `prompts` (default), `skills`, `memories`. The active tab is computed as `(searchParams.get("tab") as Tab) ?? "prompts"`, which only handles the _missing_ case — when the query param is absent, the panel falls back to `prompts`. The render is a chained ternary: `prompts → PromptsPanel`, `memories → MemoriesPanel`, anything else (including unrecognized strings) → `SkillsPanel`.
+`/manage` renders a `<Suspense>` boundary (required because the page reads `useSearchParams`) around a tab strip that updates the URL via `router.replace`. Recognized tabs: `prompts` (default), `skills`, `memories`, `agents`, `heartbeats`, `crons`. The active tab is validated against the `TABS` tuple — any unrecognized value falls back to `prompts`. The render dispatches via a `Record<Tab, React.ComponentType>` table (`PANELS`) rather than a chained ternary, so adding a tab requires editing two co-located constants.
 
 ### Post-send Navigation
 
@@ -526,6 +532,71 @@ interface MemoryEntry {
 | `deleteMemory(id): void`        | DELETE | `/api/v1/memories/:id` | `MemoriesPanel` |
 
 No create/update action exists — memories are populated by the agent (manually via `save_memory` or automatically via Mem0's `extractAndStore`). Manual editing would invalidate the stored embedding, so the UI is read + delete only.
+
+### 6.5 `app/actions/agents.ts`
+
+```ts
+interface ToolPolicy { mode: "allow" | "deny"; tools: string[] }
+interface ModelOptions { preferredProvider?, preferredModel?, maxOutputTokens?, temperature? }
+interface MessagingPolicy { enabled: boolean; allowedAgents: string[] }
+interface SandboxConfig { enabled, image, memoryMb, cpuShares, networkEnabled, envVars }
+interface AgentConfig {
+  agentID; name; description; promptSlug?; modelOptions?;
+  toolPolicy; messagingPolicy; sandboxConfig?; enabled;
+  createdAt; updatedAt;
+}
+```
+
+| Action                                       | Method | SERA endpoint              | Used by       |
+| -------------------------------------------- | ------ | -------------------------- | ------------- |
+| `listAgents(): AgentConfig[]`                | GET    | `/api/v1/agents`           | `AgentsPanel` |
+| `getAgent(agentID): AgentConfig`             | GET    | `/api/v1/agents/:agentID`  | `AgentsPanel` |
+| `createAgent(input): AgentConfig`            | POST   | `/api/v1/agents`           | `AgentsPanel` |
+| `saveAgent(agentID, input): AgentConfig`     | PUT    | `/api/v1/agents/:agentID`  | `AgentsPanel` |
+| `deleteAgent(agentID): void`                 | DELETE | `/api/v1/agents/:agentID`  | `AgentsPanel` |
+
+Agent bindings (`/api/v1/agents/bindings/*`) are exposed by the backend but not wired into the Manage UI in this iteration.
+
+### 6.6 `app/actions/heartbeats.ts`
+
+```ts
+interface ActiveHours { start: number; end: number; timezone?: string }
+interface HeartbeatConfig {
+  agentID; enabled; intervalMinutes; activeHours?;
+  checklist: string[]; maxTokens;
+  lastRunAt?; nextRunAt?; createdAt; updatedAt;
+}
+```
+
+| Action                                                | Method | SERA endpoint                  | Used by           |
+| ----------------------------------------------------- | ------ | ------------------------------ | ----------------- |
+| `listHeartbeats(): HeartbeatConfig[]`                 | GET    | `/api/v1/heartbeats`           | `HeartbeatsPanel` |
+| `getHeartbeat(agentID): HeartbeatConfig`              | GET    | `/api/v1/heartbeats/:agentID`  | `HeartbeatsPanel` |
+| `createHeartbeat(input): HeartbeatConfig`             | POST   | `/api/v1/heartbeats`           | `HeartbeatsPanel` |
+| `saveHeartbeat(agentID, input): HeartbeatConfig`      | PUT    | `/api/v1/heartbeats/:agentID`  | `HeartbeatsPanel` |
+| `deleteHeartbeat(agentID): void`                      | DELETE | `/api/v1/heartbeats/:agentID`  | `HeartbeatsPanel` |
+
+`agentID` is the immutable key (one heartbeat per agent — schema has `unique: true`).
+
+### 6.7 `app/actions/crons.ts`
+
+```ts
+interface CronJob {
+  jobID; agentID; schedule; command; description;
+  enabled; script; contextFromJobID; lastRunID;
+  lastRunAt?; nextRunAt?; createdAt; updatedAt;
+}
+```
+
+| Action                                | Method | SERA endpoint           | Used by      |
+| ------------------------------------- | ------ | ----------------------- | ------------ |
+| `listCrons(agentID?): CronJob[]`      | GET    | `/api/v1/crons`         | `CronsPanel` |
+| `getCron(jobID): CronJob`             | GET    | `/api/v1/crons/:jobID`  | `CronsPanel` |
+| `createCron(input): CronJob`          | POST   | `/api/v1/crons`         | `CronsPanel` |
+| `saveCron(jobID, input): CronJob`     | PUT    | `/api/v1/crons/:jobID`  | `CronsPanel` |
+| `deleteCron(jobID): void`             | DELETE | `/api/v1/crons/:jobID`  | `CronsPanel` |
+
+`listCrons` forwards the optional `agentID` filter as a query param. `jobID` is a UUID minted server-side on create — clients only supply `agentID`, `schedule`, `command`, and optional fields.
 
 ---
 
@@ -1027,7 +1098,35 @@ List-only panel (no detail view). Local state: `memories`, `loading`, `error`, `
 - No create/edit affordances — memory content lives as an embedding in Qdrant; editing the text without re-embedding would desync the vector from the source.
 - Empty state: "No memories found". Errors render as a red banner above the list.
 
-### 11.15 `Markdown`
+### 11.15 `AgentsPanel`
+
+Master/detail editor with create flow. Local state: `agents`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+
+- **List** — each row: name, enabled/disabled chip (green/muted), `agentID` annotation, optional description, optional `model: provider/model` summary. Header shows count + `New` button.
+- **New flow** — `New` button seeds `draft` from `NEW_AGENT_DRAFT` (deny-all tool policy, disabled messaging, `node:20-slim` sandbox defaults) and sets `isCreating`. The editor exposes an `agentID` input only while creating; once saved, the ID is immutable and disappears from the form.
+- **Detail** — sections: top fields (name, description, promptSlug, enabled), **Model Options** (preferredProvider/preferredModel/maxOutputTokens/temperature), **Tool Policy** (allow/deny select + comma-separated tools), **Messaging Policy** (toggle + comma-separated allowedAgents), **Sandbox** (toggle, image, memoryMb, cpuShares, networkEnabled).
+- `isDirty` compares `JSON.stringify(draftToUpdate(draft))` against the same projection of `selected` (or always-true while creating). Reset re-derives from `selected`.
+- Delete uses a native `confirm()` and clears the selection on success. After save the list reloads and `selected`/`draft` are refreshed from the response.
+
+### 11.16 `HeartbeatsPanel`
+
+Master/detail with create flow. Local state: `items`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+
+- **List** — each row: `agentID`, enabled chip, summary line `every Nm · N checklist items · next <localized timestamp>`.
+- **Editor sections** — top fields (enabled, intervalMinutes, maxTokens), **Active Hours** (toggle reveals start/end/timezone — start/end are 0–23 ints; UI persists draft values even when the toggle is off so re-enabling restores them), **Checklist** (multi-line textarea split on `\n`, trimmed, blanks dropped).
+- `draft.hasActiveHours` is a UI-only field that controls whether `activeHours` is sent in the update payload — `undefined` when off, the full object when on. This matches the backend treatment of the field as optional.
+- `agentID` is the immutable key (one heartbeat per agent — schema unique index).
+
+### 11.17 `CronsPanel`
+
+Master/detail with create flow. Local state: `items`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+
+- **List** — each row: `description` (or `jobID` fallback), enabled chip, mono-spaced `schedule · agentID`, optional `next: <localized timestamp>`.
+- **Editor** — `agentID` is editable while creating, disabled afterward (backend update DTO has no `agentID` field). Other fields: description, enabled, schedule (cron expression — backend recomputes `nextRunAt` on save when present), command (multi-line prompt sent to the agent), script (optional shell whose stdout is appended to the prompt), contextFromJobID (UUID of another job whose last response is appended).
+- **Run history section** (read-only, present only on existing jobs): `lastRunAt`, `nextRunAt`, and the `lastRunID` UUID for cross-referencing in `/insights/run/:runID`.
+- `jobID` is server-minted (UUID) — never shown as an editable field in the create form.
+
+### 11.18 `Markdown`
 
 Renders Markdown via `ReactMarkdown` with:
 
@@ -1036,7 +1135,7 @@ Renders Markdown via `ReactMarkdown` with:
 - Default `className` chain: `prose prose-invert prose-sm` with custom `prose-*` overrides for spacing, code color (`#a4c639`, the accent), links (accent, underline-on-hover), code-block backgrounds (`#2d2a27`), and blockquote border (accent).
 - The `className` prop overrides the default entirely.
 
-### 11.16 `IconButton`
+### 11.19 `IconButton`
 
 Reusable 40×40 button with variants:
 
@@ -1048,7 +1147,7 @@ Reusable 40×40 button with variants:
 
 Forwards all native `<button>` props. Disabled state lowers opacity to 50% and removes the pointer cursor.
 
-### 11.17 `Icons`
+### 11.20 `Icons`
 
 Single module exporting hand-rolled SVG icons used in the chat surface (where `lucide-react` is intentionally avoided for tighter visual control):
 
@@ -1056,7 +1155,7 @@ Single module exporting hand-rolled SVG icons used in the chat surface (where `l
 
 All accept `className`; `ChevronIcon` adds `isOpen?: boolean`.
 
-### 11.18 `ImageThumbnail`
+### 11.21 `ImageThumbnail`
 
 Sized image card with optional remove button.
 
