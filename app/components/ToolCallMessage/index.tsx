@@ -3,28 +3,12 @@
 import { ChevronIcon, DotIcon } from "../Icons";
 import { Collapsible } from "../Collapsible";
 import { useCollapsible } from "@/app/hooks/useCollapsible";
+import { formatArgs, formatResult } from "@/app/lib/toolCallFormat";
 import type { ToolCallBlock } from "@/app/actions/chat";
 
 interface ToolCallMessageProps {
   toolCall: ToolCallBlock;
   isLatest?: boolean;
-}
-
-function formatArgs(args: Record<string, unknown>): string {
-  const entries = Object.entries(args);
-  if (entries.length === 0) return "";
-  if (entries.length === 1) {
-    const [key, value] = entries[0];
-    const str = typeof value === "string" ? value : JSON.stringify(value);
-    if (str.length <= 120) return `${key}: ${str}`;
-  }
-  return JSON.stringify(args, null, 2);
-}
-
-function formatResult(result: unknown): string {
-  if (result == null) return "";
-  if (typeof result === "string") return result;
-  return JSON.stringify(result, null, 2);
 }
 
 export function ToolCallMessage({ toolCall, isLatest }: ToolCallMessageProps) {

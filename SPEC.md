@@ -284,19 +284,7 @@ Keying by `sub` is essential: a single module-scoped cache would leak one user's
 
 ### Sign-in / Sign-out
 
-`lib/auth-actions.ts` exposes two server actions:
-
-```ts
-"use server";
-export async function signInWithAuthentik() {
-  await signIn("authentik");
-}
-export async function signOutUser() {
-  await signOut();
-}
-```
-
-The Sidebar invokes `signOut({ callbackUrl: "/api/auth/signin" })` from `next-auth/react` directly (client-side) rather than the server action, so the user is bounced through `/api/auth/signin` post-logout.
+`Sidebar` invokes `signOut({ callbackUrl: "/api/auth/signin" })` from `next-auth/react` directly (client-side) and lets the NextAuth signin route handler render the initial sign-in page. There are no server-side wrappers — the previous `lib/auth-actions.ts` was unused and has been removed.
 
 ### Client-side Reauth
 
@@ -1201,7 +1189,7 @@ Forwards all native `<button>` props. Disabled state lowers opacity to 50% and r
 
 Single module exporting hand-rolled SVG icons used in the chat surface (where `lucide-react` is intentionally avoided for tighter visual control):
 
-- `ImageIcon`, `SendIcon`, `StopIcon`, `ChevronIcon` (rotates 90deg when `isOpen`), `DotIcon`, `AgentIcon` (subagent marker), `ChevronUpDownIcon`, `CloseIcon`.
+- `ImageIcon`, `SendIcon`, `StopIcon`, `ChevronIcon` (rotates 90deg when `isOpen`), `DotIcon`, `AgentIcon` (subagent marker), `ChevronUpDownIcon`.
 
 All accept `className`; `ChevronIcon` adds `isOpen?: boolean`.
 

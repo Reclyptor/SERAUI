@@ -18,23 +18,20 @@ export function ChatMessage({
   isLoading,
   isLatestAssistant,
 }: ChatMessageProps) {
-  const role = (message.role || "").toLowerCase();
-
-  if (role === "user") {
-    return <UserMessage message={message} />;
+  switch (message.role) {
+    case "user":
+      return <UserMessage message={message} />;
+    case "assistant":
+      return (
+        <AssistantMessage
+          message={message}
+          isLoading={isLoading}
+          isLatest={isLatestAssistant}
+        />
+      );
+    case "system":
+      return null;
   }
-
-  if (role === "assistant") {
-    return (
-      <AssistantMessage
-        message={message}
-        isLoading={isLoading}
-        isLatest={isLatestAssistant}
-      />
-    );
-  }
-
-  return null;
 }
 
 function UserMessage({ message }: { message: Message }) {
