@@ -2,7 +2,7 @@
 
 import { useSession } from "next-auth/react";
 
-function getInitials(name: string | null | undefined): string {
+export function getInitials(name: string | null | undefined): string {
   if (!name) return "?";
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) {

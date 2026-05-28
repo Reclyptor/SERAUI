@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import { refreshCache } from "@/lib/refreshCache";
 
 // --- OIDC discovery cache ---
 // The discovery document rarely changes. Cache for 1 hour to avoid a
@@ -10,7 +11,7 @@ async function getTokenEndpoint(): Promise<string> {
     return discoveryCache.tokenEndpoint;
   }
   const res = await fetch(
-    `${process.env.AUTHENTIK_ISSUER}/.well-known/openid-configuration`
+    `${process.env.AUTHENTIK_ISSUER}/.well-known/openid-configuration`,
   );
   const data = await res.json();
   discoveryCache = {
@@ -20,37 +21,17 @@ async function getTokenEndpoint(): Promise<string> {
   return data.token_endpoint;
 }
 
-// --- Token refresh cache ---
-// Authentik rotates refresh tokens on every use. If two requests arrive
-// with the same cookie, the first refresh succeeds and rotates the token;
-// the second tries the now-invalid old token and gets `invalid_grant`.
-//
-// To prevent this: cache the refresh result until the NEW access token
-// enters the refresh window (expiresAt - 120s). Any request within that
-// window reuses the cached tokens — no redundant Authentik calls, no
-// rotation race.
-interface RefreshResult {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}
-
 interface RefreshableToken {
+  sub?: string;
   refreshToken?: string;
   [key: string]: unknown;
 }
 
-let cachedRefresh: RefreshResult | null = null;
-let inflightRefresh: Promise<RefreshResult> | null = null;
-
-function getValidCache(): typeof cachedRefresh {
-  if (!cachedRefresh) return null;
-  if (Date.now() / 1000 >= cachedRefresh.expiresAt - 120) return null;
-  return cachedRefresh;
-}
-
-async function refreshAccessToken<T extends RefreshableToken>(token: T) {
-  const cached = getValidCache();
+async function refreshAccessToken<T extends RefreshableToken>(
+  token: T,
+  userKey: string,
+) {
+  const cached = refreshCache.getValid(userKey);
   if (cached) {
     return { ...token, ...cached };
   }
@@ -60,12 +41,13 @@ async function refreshAccessToken<T extends RefreshableToken>(token: T) {
   }
   const refreshToken = token.refreshToken;
 
-  if (inflightRefresh) {
+  const existing = refreshCache.getInflight(userKey);
+  if (existing) {
     try {
-      const result = await inflightRefresh;
+      const result = await existing;
       return { ...token, ...result };
     } catch {
-      const fallback = getValidCache();
+      const fallback = refreshCache.getValid(userKey);
       if (fallback) return { ...token, ...fallback };
       throw new Error("Token refresh failed");
     }
@@ -87,11 +69,10 @@ async function refreshAccessToken<T extends RefreshableToken>(token: T) {
 
     const data = await response.json();
     if (!response.ok) {
-      console.error("[Auth] Token refresh failed:", data);
+      console.error("[Auth] Token refresh failed");
       throw new Error("Token refresh failed");
     }
 
-    console.log("[Auth] Token refreshed successfully");
     return {
       accessToken: data.access_token as string,
       refreshToken: (data.refresh_token ?? token.refreshToken) as string,
@@ -99,18 +80,18 @@ async function refreshAccessToken<T extends RefreshableToken>(token: T) {
     };
   };
 
-  inflightRefresh = doRefresh();
+  const promise = doRefresh();
+  refreshCache.setInflight(userKey, promise);
   try {
-    const result = await inflightRefresh;
-    cachedRefresh = result;
+    const result = await promise;
+    refreshCache.set(userKey, result);
     return { ...token, ...result };
   } catch (error) {
-    // Another request path may have refreshed and cached while we failed
-    const fallback = getValidCache();
+    const fallback = refreshCache.getValid(userKey);
     if (fallback) return { ...token, ...fallback };
     throw error;
   } finally {
-    inflightRefresh = null;
+    refreshCache.clearInflight(userKey);
   }
 }
 
@@ -135,7 +116,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, account }) {
       if (account) {
-        cachedRefresh = null;
+        if (token.sub) refreshCache.clear(token.sub);
         return {
           ...token,
           accessToken: account.access_token,
@@ -145,16 +126,39 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       const expiresAt = token.expiresAt as number | undefined;
+      const refreshToken = token.refreshToken as string | undefined;
+
       if (expiresAt && Date.now() < expiresAt * 1000 - 120_000) {
         return token;
       }
 
-      console.log("[Auth] Token expired or expiring, refreshing...");
+      // Already in failed-refresh state — short-circuit so we don't loop
+      // forever throwing "Missing refresh token" on every JWT callback.
+      if (!refreshToken) {
+        return token;
+      }
+
+      // Without a stable user key, concurrent refreshes could leak state
+      // across users. Fail closed.
+      if (!token.sub) {
+        return {
+          ...token,
+          accessToken: undefined,
+          refreshToken: undefined,
+          expiresAt: undefined,
+        };
+      }
+
       try {
-        return await refreshAccessToken(token);
+        return await refreshAccessToken(token, token.sub);
       } catch {
         console.error("[Auth] Refresh failed, clearing session");
-        return { ...token, accessToken: undefined, refreshToken: undefined };
+        return {
+          ...token,
+          accessToken: undefined,
+          refreshToken: undefined,
+          expiresAt: undefined,
+        };
       }
     },
     async session({ session, token }) {
@@ -163,6 +167,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       if (token.expiresAt) {
         session.expiresAt = token.expiresAt as number;
+      }
+      if (token.sub) {
+        session.user.id = token.sub;
       }
       return session;
     },

@@ -246,12 +246,14 @@ The access token is **not** sent to the client. It is stored inside the encrypte
 
 ### JWT Callback
 
-On first sign-in, the `account` argument is populated. The callback clears any cached refresh and stores `accessToken`, `refreshToken`, and `expiresAt` on the JWT.
+On first sign-in, the `account` argument is populated. The callback clears the user's cached refresh entry (keyed by `token.sub`) and stores `accessToken`, `refreshToken`, and `expiresAt` on the JWT.
 
 On subsequent requests:
 
 - If `expiresAt * 1000 - 120_000 > Date.now()` (more than 2 minutes of life remaining), the token is returned unchanged.
-- Otherwise the callback invokes `refreshAccessToken(token)`. If refresh fails, `accessToken` and `refreshToken` are cleared. The session callback then sets `session.error = "RefreshError"` so the client can react.
+- If `refreshToken` is missing, the token is returned unchanged. This short-circuits the JWT callback when refresh has already failed and avoids a per-request "Missing refresh token" loop. The session callback sees the cleared `accessToken` and surfaces `session.error = "RefreshError"`.
+- If `token.sub` is missing, the callback clears `accessToken`, `refreshToken`, and `expiresAt` and fails closed — without a stable user key the per-user refresh cache cannot guarantee isolation.
+- Otherwise the callback invokes `refreshAccessToken(token, token.sub)`. If refresh fails, `accessToken`, `refreshToken`, **and `expiresAt`** are all cleared so the next callback hits the early-return above. The session callback then sets `session.error = "RefreshError"` so the client can react.
 
 ### Session Callback
 
@@ -259,6 +261,7 @@ On subsequent requests:
 
 - `session.error = "RefreshError"` whenever `token.accessToken` is missing.
 - `session.expiresAt = token.expiresAt` so the UI can render a live countdown.
+- `session.user.id = token.sub` (the Authentik subject claim) so consumers can identify the user.
 
 ### OIDC Discovery Cache
 
@@ -266,14 +269,18 @@ On subsequent requests:
 
 ### Token Refresh Cache (Race-condition Guard)
 
-Authentik rotates refresh tokens on every use. To avoid double-refresh races when concurrent requests arrive with the same cookie, `lib/auth.ts` maintains two module-scoped variables:
+Authentik rotates refresh tokens on every use. To avoid double-refresh races when concurrent requests arrive for the **same user**, `lib/refreshCache.ts` exports a `RefreshCache` class with **per-user** state keyed by the JWT `sub` claim:
 
-| Symbol            | Purpose                                                                          |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `cachedRefresh`   | Most recent successful refresh result `{ accessToken, refreshToken, expiresAt }` |
-| `inflightRefresh` | Promise of an in-progress refresh; awaited by concurrent callers                 |
+| Method                          | Purpose                                                                                |
+| ------------------------------- | -------------------------------------------------------------------------------------- |
+| `getValid(userKey, now?)`       | Returns the cached `{ accessToken, refreshToken, expiresAt }` for this user only while outside the 120s buffer; `null` otherwise. |
+| `set(userKey, result)`          | Stores a successful refresh result for this user.                                      |
+| `getInflight(userKey)`          | Returns the in-flight refresh promise for this user (so concurrent callers join it instead of double-refreshing). |
+| `setInflight(userKey, promise)` | Registers an in-flight refresh for this user.                                          |
+| `clearInflight(userKey)`        | Removes only the in-flight entry for this user.                                        |
+| `clear(userKey)`                | Removes both cached and in-flight entries for this user (used on fresh sign-in).       |
 
-`getValidCache()` returns the cached result only if `Date.now() / 1000 < cachedRefresh.expiresAt - 120` (still outside the 2-minute refresh window). If a concurrent refresh is in flight, callers await it; on failure they retry against any newly-cached result before throwing.
+Keying by `sub` is essential: a single module-scoped cache would leak one user's tokens onto another user's JWT under concurrent traffic. The pure helper `isRefreshValid(expiresAtSeconds, nowSeconds, bufferSeconds = 120)` is exported alongside the class and unit-tested in `lib/refreshCache.test.ts`. If a concurrent refresh is in flight for the same user, callers await it; on failure they retry against any newly-cached result before throwing.
 
 ### Sign-in / Sign-out
 
@@ -343,7 +350,7 @@ export const config = {
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `/api/v1/agent/:path*`                                                 | Unauthenticated → 401 JSON; otherwise rewritten to `${SERA_API_URL}${pathname}${search}` |
 | `/api/auth/*`, `_next/static`, `_next/image`, `favicon.ico`, `/health` | Excluded — pass straight through to the framework or route handler                       |
-| Everything else                                                        | Unauthenticated → 302 to `/api/auth/signin`; authenticated → continue                    |
+| Everything else                                                        | Unauthenticated → 302 to `/api/auth/signin?callbackUrl=<original>`; authenticated → continue |
 
 ### Why `auth()` Wraps the Proxy
 
@@ -699,10 +706,12 @@ Wraps `next-auth/react`'s `useSession()`. Returns:
 
 ### 9.2 `useSessionTimer(expiresAt: number | null)`
 
-Maintains a live `secondsLeft` countdown derived from `expiresAt - Math.floor(Date.now() / 1000)`. Returns `{ secondsLeft, formatted }`:
+Maintains a live `secondsLeft` countdown derived from `expiresAt - now`, where `now` comes from `useSyncExternalStore` over a 1-second `setInterval`. Returns `{ secondsLeft, formatted }`:
 
 - `formatTimeLeft(seconds)` formats `H:MM:SS` if `seconds >= 3600`, else `M:SS`. Clamps to `0:00` on non-positive input.
-- Cleared (`null`) when `expiresAt` is null. Updated on a 1-second interval; the interval is cleared on unmount or `expiresAt` change.
+- `secondsLeft` and `formatted` are `null` when `expiresAt` is `null`.
+- The subscription is managed by `useSyncExternalStore`, so `now` is read outside render (React-blessed pattern for wall-clock sources) and never goes stale when `expiresAt` populates after mount.
+- SSR snapshot is `0`; consumers gate on `expiresAt !== null` so the placeholder never reaches the DOM.
 
 Consumer: `Sidebar` (renders next to the Log out button).
 

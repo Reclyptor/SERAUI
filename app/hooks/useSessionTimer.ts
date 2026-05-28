@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
 
 function formatTimeLeft(seconds: number): string {
   if (seconds <= 0) return "0:00";
@@ -13,23 +13,27 @@ function formatTimeLeft(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function subscribeToClock(callback: () => void) {
+  const id = setInterval(callback, 1000);
+  return () => clearInterval(id);
+}
+
+function getNowSeconds() {
+  return Math.floor(Date.now() / 1000);
+}
+
+// SSR snapshot: 0 is harmless — `secondsLeft` is gated on `expiresAt !== null`
+// upstream, and the very first client render swaps in the live wall clock.
+function getServerNowSeconds() {
+  return 0;
+}
+
 export function useSessionTimer(expiresAt: number | null) {
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-
-  useEffect(() => {
-    if (expiresAt === null) return;
-
-    const update = () => {
-      setNow(Math.floor(Date.now() / 1000));
-    };
-
-    const timeout = window.setTimeout(update, 0);
-    const interval = setInterval(update, 1000);
-    return () => {
-      window.clearTimeout(timeout);
-      clearInterval(interval);
-    };
-  }, [expiresAt]);
+  const now = useSyncExternalStore(
+    subscribeToClock,
+    getNowSeconds,
+    getServerNowSeconds,
+  );
 
   const secondsLeft = expiresAt !== null ? Math.max(0, expiresAt - now) : null;
   const formatted = secondsLeft !== null ? formatTimeLeft(secondsLeft) : null;

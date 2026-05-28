@@ -16,6 +16,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Hard redirect to login if refresh failed or session is unauthenticated
   useEffect(() => {
+    if (status === "loading") return;
     if (status !== "unauthenticated" && !isRefreshError) return;
     if (reauthTriggered.current) return;
     if (window.location.pathname.startsWith("/api/auth")) return;

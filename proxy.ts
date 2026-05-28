@@ -19,7 +19,9 @@ export const proxy = auth((req) => {
   }
 
   if (!req.auth) {
-    return NextResponse.redirect(new URL("/api/auth/signin", req.url));
+    const signinURL = new URL("/api/auth/signin", req.url);
+    signinURL.searchParams.set("callbackUrl", req.url);
+    return NextResponse.redirect(signinURL);
   }
 
   return NextResponse.next();
