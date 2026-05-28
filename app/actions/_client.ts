@@ -1,13 +1,11 @@
 import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
+import { SERA_API_PREFIX, SERA_API_URL } from "@/app/config/sera";
 import {
   buildSearchParams,
   parseErrorMessage,
   type QueryValue,
 } from "./_helpers";
-
-const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
-const API_PREFIX = "/api/v1";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -45,7 +43,7 @@ export async function seraFetch<T>(
 ): Promise<T> {
   const headers = await authHeaders();
   const query = options.query ? buildSearchParams(options.query) : "";
-  const url = `${API_BASE_URL}${API_PREFIX}${path}${query}`;
+  const url = `${SERA_API_URL}${SERA_API_PREFIX}${path}${query}`;
   const method = options.method ?? "GET";
 
   const init: RequestInit = {

@@ -380,7 +380,7 @@ seraFetch<T>(path: string, options: {
 
 1. Calls `auth()` and throws `UnauthorizedError("Not authenticated")` if there is no NextAuth session. This replaces the old "any cookie present means authenticated" check, which allowed unrelated cookies (theme, csrf) to pass the gate.
 2. Forwards every cookie via `Cookie:` so SERA's `SessionAuthGuard` can decrypt and validate the session token.
-3. Hits `${SERA_API_URL}${API_PREFIX}${path}${query}` where `API_PREFIX = "/api/v1"`. The query string is built with `buildSearchParams` (URL-encoded, nullish skipped).
+3. Hits `${SERA_API_URL}${SERA_API_PREFIX}${path}${query}`. Both constants live in `app/config/sera.ts`, which throws at module load when `SERA_API_URL` is missing in production (so the server crashes early instead of silently hitting `http://localhost:3001`). The query string is built with `buildSearchParams` (URL-encoded, nullish values skipped).
 4. Sets `cache: "no-store"` for GETs.
 5. JSON-stringifies plain-object bodies and sets `Content-Type: application/json`. `FormData` bodies pass through so the runtime can set the multipart boundary itself.
 6. On non-OK responses, reads the body once and runs it through `parseErrorMessage(statusText, body, errorContext)`, which prefers `body.message` when the payload is JSON, falls back to the raw text, then to `${errorContext}: ${statusText}`. This unified format applies to **every** action, including `uploadAttachment`.
