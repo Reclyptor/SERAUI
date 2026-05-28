@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import clsx from "clsx";
 import {
@@ -15,6 +15,7 @@ import {
 import { signOut } from "next-auth/react";
 import { useUser } from "@/app/hooks/useUser";
 import { useSessionTimer } from "@/app/hooks/useSessionTimer";
+import { useClickOutside } from "@/app/hooks/useClickOutside";
 import { useChat } from "@/app/contexts/ChatContext";
 
 interface NavItemProps {
@@ -188,17 +189,7 @@ function SidebarContent({
     setIsCollapsed(true);
   };
 
-  // Close the menu when clicking outside
-  useEffect(() => {
-    if (!isUserMenuOpen) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
-        setIsUserMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isUserMenuOpen]);
+  useClickOutside(userMenuRef, isUserMenuOpen, () => setIsUserMenuOpen(false));
 
   return (
     <>

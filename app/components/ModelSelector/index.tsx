@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import clsx from "clsx";
 import { getModelDisplayName, groupModelsByProvider } from "@/app/lib/models";
+import { useClickOutside } from "@/app/hooks/useClickOutside";
 import { ChevronUpDownIcon } from "../Icons";
 
 interface ModelSelectorProps {
@@ -15,16 +16,7 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen]);
+  useClickOutside(menuRef, isOpen, () => setIsOpen(false));
 
   const grouped = groupModelsByProvider();
   const displayName = getModelDisplayName(selectedModel);

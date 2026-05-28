@@ -6,6 +6,8 @@ import { useImageCache } from "../../contexts/ImageCacheContext";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
+import { IconButton } from "../IconButton";
+import { ChatInputTextarea } from "../ChatInputTextarea";
 import { uploadAttachment, type Attachment } from "@/app/actions/chat";
 
 const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
@@ -142,23 +144,7 @@ export function ImageUploadInput({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  const handleInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
-    const target = e.target as HTMLTextAreaElement;
-    target.style.height = "auto";
-    target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
-  };
-
   const canSend = message.trim() || attachments.length > 0;
-
-  const actionButtonBase =
-    "w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
     <div className="flex flex-col w-full p-4 bg-background items-center">
@@ -234,12 +220,11 @@ export function ImageUploadInput({
           </div>
         )}
 
-        <textarea
-          ref={textareaRef}
+        <ChatInputTextarea
+          textareaRef={textareaRef}
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onInput={handleInput}
+          onChange={setMessage}
+          onSubmit={handleSubmit}
           placeholder={
             isDragging
               ? "Drop files here..."
@@ -249,23 +234,20 @@ export function ImageUploadInput({
                   ? "Queue a message..."
                   : "Reply..."
           }
-          className="flex-1 bg-transparent text-foreground text-sm px-4 pt-4 pb-2 resize-none outline-none placeholder-foreground-muted min-h-[24px] max-h-[200px]"
-          rows={1}
           autoFocus
         />
 
         <div className="flex items-center justify-between px-3 pb-3">
           <div className="flex items-center gap-1">
-            <button
-              type="button"
+            <IconButton
+              size="sm"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors disabled:opacity-50"
               title="Upload image"
               aria-label="Upload image"
             >
               <ImageIcon className="w-5 h-5" />
-            </button>
+            </IconButton>
             <ModelSelector
               selectedModel={selectedModel}
               onModelChange={onModelChange}
@@ -275,32 +257,26 @@ export function ImageUploadInput({
 
           <div className="flex items-center gap-2">
             {inProgress && onStop && (
-              <button
-                type="button"
+              <IconButton
+                size="sm"
+                variant="danger"
                 onClick={onStop}
-                className={clsx(
-                  actionButtonBase,
-                  "bg-[#e74c3c] hover:bg-[#c0392b] text-white",
-                )}
                 title="Stop generation"
                 aria-label="Stop generation"
               >
                 <StopIcon className="w-4 h-4" />
-              </button>
+              </IconButton>
             )}
-            <button
-              type="button"
+            <IconButton
+              size="sm"
+              variant="primary"
               onClick={handleSubmit}
               disabled={!canSend || uploading}
-              className={clsx(
-                actionButtonBase,
-                "bg-accent hover:bg-accent-hover text-background",
-              )}
               title={inProgress ? "Queue message" : "Send message"}
               aria-label={inProgress ? "Queue message" : "Send message"}
             >
               <SendIcon className="w-4 h-4" />
-            </button>
+            </IconButton>
           </div>
         </div>
 

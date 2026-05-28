@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { ImageIcon, SendIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
+import { IconButton } from "../IconButton";
+import { ChatInputTextarea } from "../ChatInputTextarea";
 
 interface WelcomeViewProps {
   onSend: (message: string) => void;
@@ -9,30 +12,22 @@ interface WelcomeViewProps {
   onModelChange: (modelId: string) => void;
 }
 
-export function WelcomeView({ onSend, selectedModel, onModelChange }: WelcomeViewProps) {
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const input = form.elements.namedItem("message") as HTMLTextAreaElement;
-    const message = input.value.trim();
-    if (message) {
-      onSend(message);
-    }
-  };
+export function WelcomeView({
+  onSend,
+  selectedModel,
+  onModelChange,
+}: WelcomeViewProps) {
+  const [message, setMessage] = useState("");
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      const form = e.currentTarget.form;
-      if (form) {
-        form.requestSubmit();
-      }
-    }
+  const submit = () => {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    onSend(trimmed);
+    setMessage("");
   };
 
   return (
     <div className="flex-1 flex flex-col items-center px-4 pt-[32vh]">
-      {/* Greeting */}
       <div className="flex items-center gap-3 mb-8">
         <img src="/sera.png" alt="SERA" className="w-10 h-10" />
         <h1 className="text-4xl font-light text-foreground">
@@ -40,47 +35,42 @@ export function WelcomeView({ onSend, selectedModel, onModelChange }: WelcomeVie
         </h1>
       </div>
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="w-full max-w-[672px]">
+      <div className="w-full max-w-[672px]">
         <div className="relative flex flex-col bg-background-secondary rounded-3xl">
-          <textarea
-            name="message"
+          <ChatInputTextarea
+            value={message}
+            onChange={setMessage}
+            onSubmit={submit}
             placeholder="How can I help you today?"
-            className="flex-1 bg-transparent text-foreground text-sm px-4 pt-4 pb-2 resize-none outline-none placeholder-foreground-muted min-h-[24px] max-h-[200px]"
-            rows={1}
-            onKeyDown={handleKeyDown}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = "auto";
-              target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
-            }}
           />
 
           <div className="flex items-center justify-between px-3 pb-3">
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
+              <IconButton
+                size="sm"
                 title="Attach file"
+                aria-label="Attach file"
               >
                 <ImageIcon className="w-5 h-5" />
-              </button>
+              </IconButton>
               <ModelSelector
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
               />
             </div>
 
-            <button
-              type="submit"
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-background transition-colors"
+            <IconButton
+              size="sm"
+              variant="primary"
+              onClick={submit}
               title="Send message"
+              aria-label="Send message"
             >
               <SendIcon className="w-4 h-4" />
-            </button>
+            </IconButton>
           </div>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

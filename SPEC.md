@@ -1162,13 +1162,16 @@ Renders Markdown via `ReactMarkdown` with:
 
 ### 11.19 `IconButton`
 
-Reusable 40×40 button with variants:
+Reusable icon button with `size: "sm" | "md"` (32×32 / 40×40) and variants:
 
 | Variant   | Style                                                   |
 | --------- | ------------------------------------------------------- |
 | `default` | `bg-background-secondary` border, foreground-muted icon |
+| `ghost`   | Transparent, foreground-muted icon, hover backgrounded  |
 | `danger`  | Red (`#e74c3c`)                                         |
 | `primary` | Accent green                                            |
+
+Defaults to `variant="ghost"`, `size="md"`, `type="button"`. Used by `ImageUploadInput` (Send / Stop / Upload, all `size="sm"`) and `WelcomeView` (Send / Attach).
 
 Forwards all native `<button>` props. Disabled state lowers opacity to 50% and removes the pointer cursor.
 
