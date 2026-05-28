@@ -1,10 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
-
-// Direct server-to-server base URL for the SERA API.
-const API_BASE_URL = process.env.SERA_API_URL ?? "http://localhost:3001";
-const API_PREFIX = "/api/v1";
+import { seraFetch } from "./_client";
 
 export interface SubagentMeta {
   runID: string;
@@ -63,125 +59,24 @@ export interface ChatListItem {
   updatedAt: string;
 }
 
-async function getCookieHeader(): Promise<string> {
-  const cookieStore = await cookies();
-  const allCookies = cookieStore.getAll();
-  if (allCookies.length === 0) {
-    throw new Error("Not authenticated");
-  }
-  return allCookies.map((c) => `${c.name}=${c.value}`).join("; ");
-}
-
 export async function getChats(): Promise<ChatListItem[]> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats`, {
-    headers: {
-      Cookie: cookieHeader,
-    },
-    cache: "no-store",
+  return seraFetch<ChatListItem[]>("/chats", {
+    errorContext: "Failed to fetch chats",
   });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch chats: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 export async function getChat(chatID: string): Promise<Chat> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}`, {
-    headers: {
-      Cookie: cookieHeader,
-    },
-    cache: "no-store",
+  return seraFetch<Chat>(`/chats/${encodeURIComponent(chatID)}`, {
+    errorContext: "Failed to fetch chat",
   });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch chat: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-export async function createChat(messages: Message[]): Promise<Chat> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats`, {
-    method: "POST",
-    headers: {
-      Cookie: cookieHeader,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ messages }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to create chat: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-export async function updateChat(
-  chatID: string,
-  messages: Message[],
-): Promise<Chat> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}`, {
-    method: "PATCH",
-    headers: {
-      Cookie: cookieHeader,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ messages }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to update chat: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-export async function deleteChat(chatID: string): Promise<void> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/chats/${chatID}`, {
-    method: "DELETE",
-    headers: {
-      Cookie: cookieHeader,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to delete chat: ${response.statusText}`);
-  }
 }
 
 export async function uploadAttachment(
   formData: FormData,
 ): Promise<Attachment> {
-  const cookieHeader = await getCookieHeader();
-
-  const response = await fetch(
-    `${API_BASE_URL}${API_PREFIX}/agent/attachments`,
-    {
-      method: "POST",
-      headers: {
-        Cookie: cookieHeader,
-      },
-      body: formData,
-    },
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || "Failed to upload attachment");
-  }
-
-  return response.json();
+  return seraFetch<Attachment>("/agent/attachments", {
+    method: "POST",
+    body: formData,
+    errorContext: "Failed to upload attachment",
+  });
 }

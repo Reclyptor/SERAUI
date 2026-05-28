@@ -364,13 +364,29 @@ When the proxy rewrites a request to `${SERA_API_URL}/...`, the original `Cookie
 
 ## 6. Server Actions
 
-All server actions live under `app/actions/*` and start with `"use server"`. Each action:
+All server actions live under `app/actions/*` and start with `"use server"`. They route every call through a single shared client in `app/actions/_client.ts`:
 
-1. Reads `cookies()` and serializes every cookie into a `Cookie:` header.
-2. Throws `"Not authenticated"` if the cookie store is empty.
-3. Calls SERA at `${SERA_API_URL}${API_PREFIX}${path}` where `API_PREFIX = "/api/v1"`.
-4. Uses `cache: "no-store"` for GETs.
-5. Throws a generic `Failed to <verb> <resource>: ${response.statusText}` error on non-OK responses. **Exception:** `uploadAttachment` first attempts to parse the response body as JSON and prefers a `message` field if present, otherwise falls back to `"Failed to upload attachment"`.
+```ts
+seraFetch<T>(path: string, options: {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;             // FormData passes through untouched
+  query?: Record<string, QueryValue>;
+  errorContext: string;       // "Failed to fetch chats"
+  signal?: AbortSignal;
+}): Promise<T>
+```
+
+`seraFetch`:
+
+1. Calls `auth()` and throws `UnauthorizedError("Not authenticated")` if there is no NextAuth session. This replaces the old "any cookie present means authenticated" check, which allowed unrelated cookies (theme, csrf) to pass the gate.
+2. Forwards every cookie via `Cookie:` so SERA's `SessionAuthGuard` can decrypt and validate the session token.
+3. Hits `${SERA_API_URL}${API_PREFIX}${path}${query}` where `API_PREFIX = "/api/v1"`. The query string is built with `buildSearchParams` (URL-encoded, nullish skipped).
+4. Sets `cache: "no-store"` for GETs.
+5. JSON-stringifies plain-object bodies and sets `Content-Type: application/json`. `FormData` bodies pass through so the runtime can set the multipart boundary itself.
+6. On non-OK responses, reads the body once and runs it through `parseErrorMessage(statusText, body, errorContext)`, which prefers `body.message` when the payload is JSON, falls back to the raw text, then to `${errorContext}: ${statusText}`. This unified format applies to **every** action, including `uploadAttachment`.
+7. Returns `undefined` for `204 No Content` and `DELETE` responses; otherwise parses JSON into `T`.
+
+Pure helpers (`buildSearchParams`, `parseErrorMessage`) live in `app/actions/_helpers.ts` and are unit-tested in `app/actions/_helpers.test.ts`.
 
 ### 6.1 `app/actions/chat.ts`
 
@@ -430,14 +446,11 @@ interface ChatListItem {
 }
 ```
 
-| Action                                   | Method | SERA endpoint               | Used by                                  |
-| ---------------------------------------- | ------ | --------------------------- | ---------------------------------------- |
-| `getChats(): ChatListItem[]`             | GET    | `/api/v1/chats`             | `ChatContext.refreshChats`               |
-| `getChat(chatID): Chat`                  | GET    | `/api/v1/chats/:id`         | `app/(chat)/chat/[chatID]/page.tsx`      |
-| `createChat(messages): Chat`             | POST   | `/api/v1/chats`             | _(currently unused by the UI; exported)_ |
-| `updateChat(chatID, messages): Chat`     | PATCH  | `/api/v1/chats/:id`         | _(currently unused by the UI; exported)_ |
-| `deleteChat(chatID): void`               | DELETE | `/api/v1/chats/:id`         | _(currently unused by the UI; exported)_ |
-| `uploadAttachment(formData): Attachment` | POST   | `/api/v1/agent/attachments` | `ImageUploadInput`                       |
+| Action                                   | Method | SERA endpoint               | Used by                             |
+| ---------------------------------------- | ------ | --------------------------- | ----------------------------------- |
+| `getChats(): ChatListItem[]`             | GET    | `/api/v1/chats`             | `ChatContext.refreshChats`          |
+| `getChat(chatID): Chat`                  | GET    | `/api/v1/chats/:id`         | `app/(chat)/chat/[chatID]/page.tsx` |
+| `uploadAttachment(formData): Attachment` | POST   | `/api/v1/agent/attachments` | `ImageUploadInput`                  |
 
 Note: `uploadAttachment` is invoked as a server action with cookie forwarding directly to SERA, not via the browser proxy rewrite. The multipart field name is `file`. The UI stores returned image attachment IDs alongside local previews, while durable bytes are fetched from `/api/v1/agent/attachments/:id/content` on reload.
 
@@ -470,7 +483,6 @@ interface PromptDetail {
 | `listPrompts(): PromptListItem[]`      | GET    | `/api/v1/prompts`       | `PromptsPanel` |
 | `getPrompt(slug): PromptDetail`        | GET    | `/api/v1/prompts/:slug` | `PromptsPanel` |
 | `savePrompt(slug, data): PromptDetail` | PUT    | `/api/v1/prompts/:slug` | `PromptsPanel` |
-| `deletePrompt(slug): void`             | DELETE | `/api/v1/prompts/:slug` | _(unused)_     |
 
 `savePrompt` body shape: `{ content: string; extends?: string; description?: string; metadata?: Record<string, unknown> }`. Slug is URL-encoded.
 
@@ -517,7 +529,6 @@ interface SkillDetail {
 | `listSkills(): SkillListItem[]`      | GET    | `/api/v1/skills`       | `SkillsPanel` |
 | `getSkill(name): SkillDetail`        | GET    | `/api/v1/skills/:name` | `SkillsPanel` |
 | `saveSkill(name, data): SkillDetail` | PUT    | `/api/v1/skills/:name` | `SkillsPanel` |
-| `deleteSkill(name): void`            | DELETE | `/api/v1/skills/:name` | _(unused)_    |
 
 `saveSkill` body shape: `{ content?: string; description?: string; allowedTools?: string[]; metadata?: Record<string, unknown> }`. Name is URL-encoded.
 
