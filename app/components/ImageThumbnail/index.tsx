@@ -36,6 +36,7 @@ export function ImageThumbnail({
           disabled={disabled}
           className="absolute -top-2 -right-2 w-5 h-5 bg-[#e74c3c] text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
           type="button"
+          aria-label="Remove image"
         >
           ×
         </button>

@@ -28,6 +28,7 @@ interface NavItemProps {
 function NavItem({ icon, label, onClick, isCollapsed, isActive }: NavItemProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={clsx(
         "flex items-center gap-3 h-8 rounded-lg transition-colors",
@@ -36,6 +37,7 @@ function NavItem({ icon, label, onClick, isCollapsed, isActive }: NavItemProps) 
         isActive && "bg-background-tertiary text-foreground"
       )}
       title={isCollapsed ? label : undefined}
+      aria-label={isCollapsed ? label : undefined}
     >
       <div className="w-5 h-5 flex items-center justify-center shrink-0">
         {icon}
@@ -62,6 +64,7 @@ function ChatItem({
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className={clsx(
         "w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors",
@@ -215,9 +218,11 @@ function SidebarContent({
           </div>
         ) : (
           <button
+            type="button"
             onClick={() => setIsCollapsed(false)}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-background-tertiary transition-colors"
             title="Expand sidebar"
+            aria-label="Expand sidebar"
           >
             <div className="w-5 h-5 shrink-0">
               <img src="/sera.png" alt="SERA" className="w-full h-full object-cover" />
@@ -226,9 +231,11 @@ function SidebarContent({
         )}
         {!isCollapsed && (
           <button
+            type="button"
             onClick={collapseSidebar}
             className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
             title="Collapse sidebar"
+            aria-label="Collapse sidebar"
           >
             <PanelLeftClose className="w-5 h-5" />
           </button>
@@ -306,6 +313,7 @@ function SidebarContent({
             >
               {/* Logout button with session timer */}
               <button
+                type="button"
                 onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
                 className="flex items-center justify-between w-full px-2 py-1.5 rounded-md text-sm text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors"
               >
@@ -329,6 +337,7 @@ function SidebarContent({
           )}
         >
           <button
+            type="button"
             onClick={isCollapsed ? undefined : () => setIsUserMenuOpen((prev) => !prev)}
             className={clsx(
               "flex items-center gap-3 rounded-lg transition-colors",
@@ -337,6 +346,7 @@ function SidebarContent({
                 : "w-full h-8 pl-1.5 pr-3 hover:bg-background-tertiary"
             )}
             title={isCollapsed ? userName : undefined}
+            aria-label={isCollapsed ? userName : undefined}
           >
             <div className="w-5 h-5 rounded-full bg-foreground-muted flex items-center justify-center text-background text-xs font-medium shrink-0">
               {userInitials}

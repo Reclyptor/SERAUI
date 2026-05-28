@@ -6,10 +6,7 @@ import { useImageCache } from "../../contexts/ImageCacheContext";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
-import {
-  uploadAttachment as uploadAttachmentAction,
-  type Attachment,
-} from "@/app/actions/chat";
+import { uploadAttachment, type Attachment } from "@/app/actions/chat";
 
 const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
 
@@ -103,12 +100,6 @@ export function ImageUploadInput({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const uploadAttachment = async (file: File): Promise<Attachment> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    return uploadAttachmentAction(formData);
-  };
-
   const handleSubmit = async () => {
     if (uploading) return;
     if (!message.trim() && attachments.length === 0) return;
@@ -120,7 +111,9 @@ export function ImageUploadInput({
 
       const uploadedAttachments = await Promise.all(
         attachments.map(async (item) => {
-          const uploaded = await uploadAttachment(item.file);
+          const formData = new FormData();
+          formData.append("file", item.file);
+          const uploaded = await uploadAttachment(formData);
           if (uploaded.kind === "image" && item.preview) {
             addImage(uploaded.id, item.preview, uploaded.mimeType);
           }
@@ -172,11 +165,15 @@ export function ImageUploadInput({
       {queue.length > 0 && (
         <div className="flex flex-col gap-1 w-full max-w-[672px] px-4 pb-2">
           {queue.map((msg, i) => (
-            <div key={i} className="flex items-center gap-2">
+            // The hook's queue is exposed as string[] (display labels only),
+            // so we compose a key from index + content to avoid the unstable
+            // pure-index key that reused rows on dismiss.
+            <div key={`${i}:${msg}`} className="flex items-center gap-2">
               <span className="text-xs text-foreground-muted truncate flex-1">
                 Queued: {msg}
               </span>
               <button
+                type="button"
                 onClick={() => onDismissFromQueue(i)}
                 className="text-xs text-foreground-muted hover:text-foreground shrink-0 cursor-pointer"
               >
@@ -260,10 +257,12 @@ export function ImageUploadInput({
         <div className="flex items-center justify-between px-3 pb-3">
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-foreground-muted hover:text-foreground hover:bg-background-tertiary transition-colors disabled:opacity-50"
               title="Upload image"
+              aria-label="Upload image"
             >
               <ImageIcon className="w-5 h-5" />
             </button>
@@ -277,17 +276,20 @@ export function ImageUploadInput({
           <div className="flex items-center gap-2">
             {inProgress && onStop && (
               <button
+                type="button"
                 onClick={onStop}
                 className={clsx(
                   actionButtonBase,
                   "bg-[#e74c3c] hover:bg-[#c0392b] text-white",
                 )}
                 title="Stop generation"
+                aria-label="Stop generation"
               >
                 <StopIcon className="w-4 h-4" />
               </button>
             )}
             <button
+              type="button"
               onClick={handleSubmit}
               disabled={!canSend || uploading}
               className={clsx(
@@ -295,6 +297,7 @@ export function ImageUploadInput({
                 "bg-accent hover:bg-accent-hover text-background",
               )}
               title={inProgress ? "Queue message" : "Send message"}
+              aria-label={inProgress ? "Queue message" : "Send message"}
             >
               <SendIcon className="w-4 h-4" />
             </button>

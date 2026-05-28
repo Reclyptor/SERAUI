@@ -936,13 +936,11 @@ Pass-through wrapper. Pulls `sessionId` from `ChatContext` and uses it as the `k
 
 Props: `{ chatID: string | null; initialMessages: Message[]; initialModel?: string }`.
 
-Holds an `appendMessageRef` (currently unused by siblings; declared for future inter-component messaging).
-
 ### 11.2 `SeraChat`
 
 The chat surface. Wires `useAgentChat` to the message list, input, confirmations, and queue chips.
 
-Props: `{ chatID, initialMessages, initialModel?, appendMessageRef? }`.
+Props: `{ chatID, initialMessages, initialModel? }`.
 
 Behaviors:
 
@@ -950,7 +948,6 @@ Behaviors:
 - **Pending indicator:** if the run is loading and the last message is the user's, renders an extra blank assistant `<ChatMessage>` with `isLoading=true` to show a "Thinking…" stub before the assistant streams in.
 - **Latest-assistant marker:** computes `lastAssistantIndex` via `findLastIndex` so `ChatMessage` can pass `isLatestAssistant` only to the bottom-most assistant message. This drives auto-collapsing of historical thinking/tool blocks.
 - **URL rewrite + sidebar refresh:** a `prevLoadingRef` detects the `true → false` transition. On completion, if the page was originally `/new` (`!chatID`), the run yielded an `activeChatID`, and `hasNavigatedRef.current` is still false, the URL is updated via `window.history.replaceState(null, "", `/chat/${activeChatID}`)` (no navigation) and `hasNavigatedRef.current` is set so the rewrite fires exactly once. Either way, `refreshChats()` is invoked so the sidebar's recents update.
-- **Announcements:** `appendMessageRef.current` is exposed as a function that pushes onto a local `announcements` array. The chat view renders announcements after the regular message list. (No consumer wires `appendMessageRef` today, but the wiring is in place.)
 - **Auto-scroll:** a `scrollRef` is set to `scrollHeight` on every `messages`, `isLoading`, or `pendingConfirmations` change.
 
 ### 11.3 `ChatMessage`

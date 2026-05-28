@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef } from "react";
 import { SeraChat } from "../SeraChat";
 import { useChat } from "../../contexts/ChatContext";
 import type { Message } from "@/app/actions/chat";
@@ -16,7 +15,6 @@ export function ChatContainer({
   initialMessages,
   initialModel,
 }: ChatContainerProps) {
-  const appendMessageRef = useRef<(msg: Message) => void>(undefined);
   const { sessionId } = useChat();
 
   return (
@@ -27,7 +25,6 @@ export function ChatContainer({
           chatID={chatID}
           initialMessages={initialMessages}
           initialModel={initialModel}
-          appendMessageRef={appendMessageRef}
         />
       </div>
     </div>

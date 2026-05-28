@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useAgentChat } from "../../hooks/useAgentChat";
 import { useChat } from "../../contexts/ChatContext";
 import { ChatMessage } from "../ChatMessage";
@@ -14,22 +14,26 @@ interface SeraChatProps {
   chatID: string | null;
   initialMessages: Message[];
   initialModel?: string;
-  appendMessageRef?: React.MutableRefObject<
-    ((msg: Message) => void) | undefined
-  >;
 }
 
 export function SeraChat({
   chatID,
   initialMessages,
   initialModel,
-  appendMessageRef,
 }: SeraChatProps) {
   const { refreshChats } = useChat();
   const {
-    messages, sendMessage, isLoading, chatID: activeChatID, stopGeneration,
-    queue, dismissFromQueue, pendingConfirmations, resolveConfirmation,
-    model, setModel,
+    messages,
+    sendMessage,
+    isLoading,
+    chatID: activeChatID,
+    stopGeneration,
+    queue,
+    dismissFromQueue,
+    pendingConfirmations,
+    resolveConfirmation,
+    model,
+    setModel,
   } = useAgentChat({
     initialMessages,
     chatID,
@@ -37,7 +41,6 @@ export function SeraChat({
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [announcements, setAnnouncements] = useState<Message[]>([]);
   const hasNavigatedRef = useRef(false);
 
   // Update URL + refresh sidebar after streaming completes
@@ -52,21 +55,6 @@ export function SeraChat({
     }
     prevLoadingRef.current = isLoading;
   }, [isLoading, chatID, activeChatID, refreshChats]);
-
-  // Expose append for sibling components
-  useEffect(() => {
-    if (appendMessageRef) {
-      appendMessageRef.current = (msg: Message) => {
-        setAnnouncements((prev) => [
-          ...prev,
-          { ...msg, id: msg.id ?? crypto.randomUUID() },
-        ]);
-      };
-    }
-    return () => {
-      if (appendMessageRef) appendMessageRef.current = undefined;
-    };
-  }, [appendMessageRef]);
 
   // Auto-scroll
   useEffect(() => {
@@ -94,7 +82,7 @@ export function SeraChat({
     messages[messages.length - 1].role === "user";
 
   const lastAssistantIndex = messages.findLastIndex(
-    (m) => m.role === "assistant"
+    (m) => m.role === "assistant",
   );
 
   return (
@@ -108,10 +96,6 @@ export function SeraChat({
               isLoading={index === messages.length - 1 && isLoading}
               isLatestAssistant={index === lastAssistantIndex}
             />
-          ))}
-
-          {announcements.map((msg) => (
-            <ChatMessage key={msg.id} message={msg} isLoading={false} />
           ))}
 
           {pendingConfirmations.map((c) => (
