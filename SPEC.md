@@ -1123,32 +1123,59 @@ List-only panel (no detail view). Local state: `memories`, `loading`, `error`, `
 - No create/edit affordances — memory content lives as an embedding in Qdrant; editing the text without re-embedding would desync the vector from the source.
 - Empty state: "No memories found". Errors render as a red banner above the list.
 
+### 11.14a `ManagePanel` (shared shell)
+
+All six manage panels render through one generic `<ManagePanel<TItem, TDraft, TCreate, TUpdate>>` at `app/components/ManagePanel/index.tsx`. The shell owns:
+
+- State: `items`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+- Handlers: `load`, `handleSelect` (race-safe via a `selectTokenRef` so a slow earlier `get` can't overwrite the user's newer pick), `handleNew`, `handleReset`, `handleSave`, `handleDelete`, `handleBack`.
+- `isDirty` derived from a memoized `JSON.stringify(draftToUpdate(toDraft(selected)))` baseline (re-derives only when `selected` changes).
+- Header (back / title / count / `New`), error banner, list / loading / empty / editor switch, `EditorActions` footer (Delete / Reset / Save).
+- Exported helpers `Field`, `Section`, `Toggle`, `inputClass` for per-resource `renderEditor` callbacks.
+
+Each consumer panel passes:
+
+```ts
+<ManagePanel<TItem, TDraft, TCreate, TUpdate>
+  resource={{ list, get, create?, save, delete? }}
+  getKey={(item) => item.id}
+  newDraft={() => /* fresh nested objects, never a shared constant */}
+  toDraft={(item) => /* server shape -> editor draft */}
+  draftToUpdate={(draft) => /* editor draft -> update payload */}
+  draftToCreate={(draft) => /* editor draft -> create payload */}
+  validateCreate={(draft) => "agentID required" | null}
+  labels={{ singular, plural, newTitle, deleteConfirm? }}
+  renderRow={(item) => /* list row JSX */}
+  renderEditor={({ draft, setDraft, isCreating, selected }) => /* form JSX */}
+/>
+```
+
+Save and delete refresh the list **outside** the save try/catch, so a list-refresh failure surfaces as "Saved, but failed to refresh …" instead of being mis-reported as "Failed to save".
+
 ### 11.15 `AgentsPanel`
 
-Master/detail editor with create flow. Local state: `agents`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+Thin `ManagePanel` wrapper (see §11.14a). Per-resource bits:
 
-- **List** — each row: name, enabled/disabled chip (green/muted), `agentID` annotation, optional description, optional `model: provider/model` summary. Header shows count + `New` button.
-- **New flow** — `New` button seeds `draft` from `NEW_AGENT_DRAFT` (deny-all tool policy, disabled messaging, `node:20-slim` sandbox defaults) and sets `isCreating`. The editor exposes an `agentID` input only while creating; once saved, the ID is immutable and disappears from the form.
-- **Detail** — sections: top fields (name, description, promptSlug, enabled), **Model Options** (preferredProvider/preferredModel/maxOutputTokens/temperature), **Tool Policy** (allow/deny select + comma-separated tools), **Messaging Policy** (toggle + comma-separated allowedAgents), **Sandbox** (toggle, image, memoryMb, cpuShares, networkEnabled).
-- `isDirty` compares `JSON.stringify(draftToUpdate(draft))` against the same projection of `selected` (or always-true while creating). Reset re-derives from `selected`.
-- Delete uses a native `confirm()` and clears the selection on success. After save the list reloads and `selected`/`draft` are refreshed from the response.
+- **Draft factory** returns fresh nested objects each `New` click — `toolPolicy.tools`, `messagingPolicy.allowedAgents`, `sandboxConfig.envVars` are never shared between drafts.
+- **Row** — name, enabled/disabled chip, `agentID` annotation, optional description, optional `model: provider/model` summary.
+- **Editor sections** — top fields (name, description, promptSlug, enabled), **Model Options** (preferredProvider/preferredModel/maxOutputTokens/temperature), **Tool Policy** (allow/deny select + comma-separated tools), **Messaging Policy** (toggle + comma-separated allowedAgents), **Sandbox** (toggle, image, memoryMb, cpuShares, networkEnabled).
+- Editor exposes the `agentID` input only while creating; once saved, the ID is immutable and disappears from the form.
 
 ### 11.16 `HeartbeatsPanel`
 
-Master/detail with create flow. Local state: `items`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+Thin `ManagePanel` wrapper. Per-resource bits:
 
-- **List** — each row: `agentID`, enabled chip, summary line `every Nm · N checklist items · next <localized timestamp>`.
-- **Editor sections** — top fields (enabled, intervalMinutes, maxTokens), **Active Hours** (toggle reveals start/end/timezone — start/end are 0–23 ints; UI persists draft values even when the toggle is off so re-enabling restores them), **Checklist** (multi-line textarea split on `\n`, trimmed, blanks dropped).
-- `draft.hasActiveHours` is a UI-only field that controls whether `activeHours` is sent in the update payload — `undefined` when off, the full object when on. This matches the backend treatment of the field as optional.
+- **Row** — `agentID`, enabled chip, summary line `every Nm · N checklist items · next <localized timestamp>`.
+- **Editor sections** — top fields (enabled, intervalMinutes, maxTokens), **Active Hours** (toggle reveals start/end/timezone — start/end are 0–23 ints; draft values persist when the toggle is off so re-enabling restores them), **Checklist** (multi-line textarea split on `\n`, trimmed, blanks dropped).
+- `draft.hasActiveHours` is a UI-only field that controls whether `activeHours` is sent in the update payload — `undefined` when off, the full object when on.
 - `agentID` is the immutable key (one heartbeat per agent — schema unique index).
 
 ### 11.17 `CronsPanel`
 
-Master/detail with create flow. Local state: `items`, `selected`, `draft`, `isCreating`, `loading`, `saving`, `error`.
+Thin `ManagePanel` wrapper. Per-resource bits:
 
-- **List** — each row: `description` (or `jobID` fallback), enabled chip, mono-spaced `schedule · agentID`, optional `next: <localized timestamp>`.
-- **Editor** — `agentID` is editable while creating, disabled afterward (backend update DTO has no `agentID` field). Other fields: description, enabled, schedule (cron expression — backend recomputes `nextRunAt` on save when present), command (multi-line prompt sent to the agent), script (optional shell whose stdout is appended to the prompt), contextFromJobID (UUID of another job whose last response is appended).
-- **Run history section** (read-only, present only on existing jobs): `lastRunAt`, `nextRunAt`, and the `lastRunID` UUID for cross-referencing in `/insights/run/:runID`.
+- **Row** — `description` (or `jobID` fallback), enabled chip, mono-spaced `schedule · agentID`, optional `next: <localized timestamp>`. `editorTitle` shows `description || jobID` in the editor header.
+- **Editor** — `agentID` editable while creating, disabled afterward (backend update DTO has no `agentID` field). Other fields: description, enabled, schedule, command, script, contextFromJobID. Read-only **Run history** section (rendered from `selected`, not `draft`) shows `lastRunAt`, `nextRunAt`, `lastRunID`.
 - `jobID` is server-minted (UUID) — never shown as an editable field in the create form.
 
 ### 11.18 `Markdown`
