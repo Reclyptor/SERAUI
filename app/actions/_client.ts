@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
-import { SERA_API_PREFIX, SERA_API_URL } from "@/app/config/sera";
+import { SERA_API_PREFIX, getSeraApiUrl } from "@/app/config/sera";
 import {
   buildSearchParams,
   parseErrorMessage,
@@ -43,7 +43,7 @@ export async function seraFetch<T>(
 ): Promise<T> {
   const headers = await authHeaders();
   const query = options.query ? buildSearchParams(options.query) : "";
-  const url = `${SERA_API_URL}${SERA_API_PREFIX}${path}${query}`;
+  const url = `${getSeraApiUrl()}${SERA_API_PREFIX}${path}${query}`;
   const method = options.method ?? "GET";
 
   const init: RequestInit = {

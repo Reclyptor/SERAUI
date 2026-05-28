@@ -1,8 +1,13 @@
-// Single source of the SERA API base URL. Imported by the server-action
-// client. Fails fast at boot when SERA_API_URL is missing in production so
-// the server crashes early instead of silently hitting localhost.
+// Lazy SERA base-URL resolution. Throwing at module load broke `next build`
+// because Next.js evaluates server modules in production mode while collecting
+// page data, and the build environment legitimately doesn't have
+// SERA_API_URL set. Deferring the check to first call still fails fast at
+// runtime (the first request hits this before doing anything else), but
+// keeps the build itself environment-agnostic.
 
-function resolveBaseUrl(): string {
+export const SERA_API_PREFIX = "/api/v1";
+
+export function getSeraApiUrl(): string {
   const url = process.env.SERA_API_URL;
   if (url) return url;
   if (process.env.NODE_ENV === "production") {
@@ -10,6 +15,3 @@ function resolveBaseUrl(): string {
   }
   return "http://localhost:3001";
 }
-
-export const SERA_API_URL = resolveBaseUrl();
-export const SERA_API_PREFIX = "/api/v1";
