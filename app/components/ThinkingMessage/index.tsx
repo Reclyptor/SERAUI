@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Markdown } from "../Markdown";
 import { ChevronIcon } from "../Icons";
+import { Collapsible } from "../Collapsible";
+import { useCollapsible } from "@/app/hooks/useCollapsible";
+import caretStyles from "./caret.module.css";
 
 function useCharStream(
   target: string,
@@ -99,19 +102,6 @@ function useProgressiveReveal(content: string, streaming: boolean): string {
   return display;
 }
 
-const caretStyles = `
-.streaming-caret > div > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after,
-.streaming-caret > div > :last-child:is(ul, ol) > li:last-child::after,
-.streaming-caret > div > blockquote:last-child > :last-child::after,
-.streaming-caret > div > pre:last-child code::after,
-.streaming-caret > div > table:last-child tr:last-child td:last-child::after {
-  content: " ▎";
-  font-weight: 600;
-  color: var(--color-accent);
-  animation: pulse 0.8s steps(1) infinite;
-}
-`;
-
 interface ThinkingMessageProps {
   content: string;
   thinking?: string;
@@ -134,14 +124,10 @@ export function ThinkingMessage({
 
   const isThinkingComplete = thinkingDuration != null;
   const displayContent = useProgressiveReveal(content, !!isLoading);
-  const autoCollapsed = isThinkingComplete && !isLatest;
-  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
-  const isCollapsed = manualCollapsed ?? autoCollapsed;
+  const { isCollapsed, toggle } = useCollapsible(
+    isThinkingComplete && !isLatest,
+  );
   const responseComplete = !isLoading;
-
-  const handleToggle = useCallback(() => {
-    setManualCollapsed((current) => !(current ?? autoCollapsed));
-  }, [autoCollapsed]);
 
   useCharStream(thinking ?? "", isThinkingComplete, thinkingTextRef, scrollRef);
 
@@ -160,8 +146,7 @@ export function ThinkingMessage({
     return (
       <div>
         {children}
-        <div className={isLoading ? "streaming-caret" : undefined}>
-          {isLoading && <style>{caretStyles}</style>}
+        <div className={isLoading ? caretStyles.streamingCaret : undefined}>
           <Markdown content={displayContent} />
         </div>
       </div>
@@ -179,44 +164,46 @@ export function ThinkingMessage({
       <div className="mb-4">
         <button
           type="button"
-          onClick={handleToggle}
+          onClick={toggle}
           className="flex items-center gap-1.5 py-1 cursor-pointer text-[11px] font-medium text-foreground-muted hover:text-foreground transition-colors select-none"
         >
           <ChevronIcon isOpen={!isCollapsed} className="w-2.5 h-2.5 -mt-px" />
-          <span className={`leading-none ${isStreaming ? "animate-pulse" : ""}`}>
+          <span
+            className={`leading-none ${isStreaming ? "animate-pulse" : ""}`}
+          >
             {label}
           </span>
         </button>
 
-        <div
-          className="grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.2,0,0,1)]"
-          style={{ gridTemplateRows: isCollapsed ? "0fr" : "1fr" }}
-        >
-          <div className="overflow-hidden min-h-0">
-            <div
-              ref={scrollRef}
-              className={[
-                "mt-1 pl-3 max-h-[200px] text-[12px] text-foreground-muted/70 leading-relaxed",
-                "overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words",
-                "transition-[border-color] duration-300",
-                isStreaming ? "border-l-2 border-l-accent" : "border-l border-l-border",
-              ].join(" ")}
-            >
-              {isThinkingComplete ? (
-                <span>{thinking}</span>
-              ) : (
-                <span ref={thinkingTextRef} />
-              )}
-            </div>
+        <Collapsible isOpen={!isCollapsed} durationMs={300}>
+          <div
+            ref={scrollRef}
+            className={[
+              "mt-1 pl-3 max-h-[200px] text-[12px] text-foreground-muted/70 leading-relaxed",
+              "overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words",
+              "transition-[border-color] duration-300",
+              isStreaming
+                ? "border-l-2 border-l-accent"
+                : "border-l border-l-border",
+            ].join(" ")}
+          >
+            {isThinkingComplete ? (
+              <span>{thinking}</span>
+            ) : (
+              <span ref={thinkingTextRef} />
+            )}
           </div>
-        </div>
+        </Collapsible>
       </div>
 
       {children}
 
       {content ? (
-        <div className={!responseComplete ? "streaming-caret" : undefined}>
-          {!responseComplete && <style>{caretStyles}</style>}
+        <div
+          className={
+            !responseComplete ? caretStyles.streamingCaret : undefined
+          }
+        >
           <Markdown content={displayContent} />
         </div>
       ) : null}

@@ -1,0 +1,10 @@
+.streamingCaret > div > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after,
+.streamingCaret > div > :last-child:is(ul, ol) > li:last-child::after,
+.streamingCaret > div > blockquote:last-child > :last-child::after,
+.streamingCaret > div > pre:last-child code::after,
+.streamingCaret > div > table:last-child tr:last-child td:last-child::after {
+  content: " ▎";
+  font-weight: 600;
+  color: var(--color-accent);
+  animation: pulse 0.8s steps(1) infinite;
+}
