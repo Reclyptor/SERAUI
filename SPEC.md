@@ -1097,28 +1097,23 @@ User profile dropdown:
 
 ### 11.12 `PromptsPanel`
 
-Master/detail editor. Local state: `prompts`, `selected`, `draft`, `loading`, `saving`, `error`.
+Thin `ManagePanel` wrapper (see §11.14a) configured without `create` or `delete` on the `resource` — only `list` / `get` / `save`. Per-resource bits:
 
-- **List** — `PromptList`; renders each prompt as a row with `slug`, optional `description`, optional `extends X` annotation. Spinner during load; "No prompts found" empty state.
-- **Detail** — `PromptEditor`; full-height `<textarea>` (monospace) bound to `draft`. `isDirty` is `draft !== selected.content`. Save passes through `extends`, `description`, and `metadata` unchanged. After save, the panel refreshes the list and re-sets `selected` from the response.
-- **Back** chevron returns to the list, resetting `selected`, `draft`, and `error`.
-- Errors render as a red banner above the content.
+- **Row** — `slug`, optional `description`, optional `extends X` annotation.
+- **Editor** — single full-height monospace `<textarea>` bound to `draft.content`. `extends`, `description`, and `metadata` are preserved unchanged through save.
 
 ### 11.13 `SkillsPanel`
 
-Same master/detail pattern. Local state: `skills`, `selected`, `draftContent`, `draftDescription`, `loading`, `saving`, `error`.
+Thin `ManagePanel` wrapper without `create` / `delete`. Per-resource bits:
 
-- **List** — `SkillList`; each row shows the name, a colored status chip (`active`/`stale`/`archived`), description, and `tools: …` summary if `allowedTools.length > 0`. Status chip colors:
-  - `active` → green
-  - `stale` → yellow
-  - `archived` → muted foreground
-- **Detail** — separate inputs for description and content. `isDirty` requires either to differ from `selected`. After save, both drafts are reset from the response. The selected skill's bundled files are listed as read-only chips (paths only — content is not editable here).
+- **Row** — name, colored status chip (`active` green / `stale` yellow / `archived` muted), description, optional `tools: …` summary.
+- **Editor** — `Field` description input + full-height monospace content `<textarea>`. The selected skill's bundled files render as read-only chips (paths only — content is not editable here).
 
 ### 11.14 `MemoriesPanel`
 
-List-only panel (no detail view). Local state: `memories`, `loading`, `error`, `confirmingId`, `deletingId`.
+List-only panel — does NOT use `ManagePanel` because its delete UX (inline two-step confirm appearing on row hover) is structurally different from the master/detail shell. Local state: `memories`, `loading`, `error`, `confirmingId`, `deletingId`.
 
-- **List** — each `MemoryRow` shows the full memory content (whitespace-preserved, wrapped), a relative timestamp (`just now`/`Nm`/`Nh`/`Nd ago`, falling back to `toLocaleDateString()` past a week), and every tag rendered as a small chip. Header shows a count next to the title once loaded.
+- **List** — each `MemoryRow` shows the full memory content (whitespace-preserved, wrapped), a relative timestamp via `formatTimestamp` in `app/lib/time.ts` (`just now` / `Nm` / `Nh` / `Nd ago`, falling back to `toLocaleDateString()` past a week; future-dated entries clamp to `just now`), and every tag rendered as a small chip. Header shows a count next to the title once loaded.
 - **Delete** — trash icon appears on row hover. First click moves the row into `confirmingId` state, swapping the trash for a red check (confirm) + neutral X (cancel). Confirming sets `deletingId`, calls `deleteMemory`, and optimistically removes the row from local state. The check icon turns into a spinner during the in-flight delete.
 - No create/edit affordances — memory content lives as an embedding in Qdrant; editing the text without re-embedding would desync the vector from the source.
 - Empty state: "No memories found". Errors render as a red banner above the list.

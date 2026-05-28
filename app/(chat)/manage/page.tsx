@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, type ComponentType } from "react";
 import clsx from "clsx";
 import { Loader2 } from "lucide-react";
 import { PromptsPanel } from "@/app/components/PromptsPanel";
@@ -11,32 +11,37 @@ import { AgentsPanel } from "@/app/components/AgentsPanel";
 import { HeartbeatsPanel } from "@/app/components/HeartbeatsPanel";
 import { CronsPanel } from "@/app/components/CronsPanel";
 
-const TABS = [
-  "prompts",
-  "skills",
-  "memories",
-  "agents",
-  "heartbeats",
-  "crons",
-] as const;
-type Tab = (typeof TABS)[number];
+interface TabConfig {
+  id: string;
+  label: string;
+  Panel: ComponentType;
+}
 
-const PANELS: Record<Tab, React.ComponentType> = {
-  prompts: PromptsPanel,
-  skills: SkillsPanel,
-  memories: MemoriesPanel,
-  agents: AgentsPanel,
-  heartbeats: HeartbeatsPanel,
-  crons: CronsPanel,
-};
+// Single source of tab id, label, and panel — adding a new manage tab is one
+// row here. Labels are explicit so "Cron Jobs" doesn't render as "crons" via
+// `capitalize`.
+const TAB_CONFIG = [
+  { id: "prompts", label: "Prompts", Panel: PromptsPanel },
+  { id: "skills", label: "Skills", Panel: SkillsPanel },
+  { id: "memories", label: "Memories", Panel: MemoriesPanel },
+  { id: "agents", label: "Agents", Panel: AgentsPanel },
+  { id: "heartbeats", label: "Heartbeats", Panel: HeartbeatsPanel },
+  { id: "crons", label: "Cron Jobs", Panel: CronsPanel },
+] as const satisfies readonly TabConfig[];
+
+type Tab = (typeof TAB_CONFIG)[number]["id"];
+
+function isTab(value: string | null): value is Tab {
+  return value !== null && TAB_CONFIG.some((t) => t.id === value);
+}
 
 function ManageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const requestedTab = searchParams.get("tab") as Tab | null;
-  const activeTab: Tab =
-    requestedTab && TABS.includes(requestedTab) ? requestedTab : "prompts";
-  const ActivePanel = PANELS[activeTab];
+  const requested = searchParams.get("tab");
+  const activeTab: Tab = isTab(requested) ? requested : "prompts";
+  const active = TAB_CONFIG.find((t) => t.id === activeTab) ?? TAB_CONFIG[0];
+  const ActivePanel = active.Panel;
 
   const setTab = (tab: Tab) => {
     router.replace(`/manage?tab=${tab}`);
@@ -45,18 +50,19 @@ function ManageContent() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-1 px-6 pt-3 pb-0 shrink-0">
-        {TABS.map((tab) => (
+        {TAB_CONFIG.map((tab) => (
           <button
-            key={tab}
-            onClick={() => setTab(tab)}
+            key={tab.id}
+            type="button"
+            onClick={() => setTab(tab.id)}
             className={clsx(
-              "px-3 py-1.5 rounded-md text-sm font-medium transition-colors capitalize",
-              activeTab === tab
+              "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+              activeTab === tab.id
                 ? "bg-background-tertiary text-foreground"
                 : "text-foreground-muted hover:text-foreground hover:bg-background-secondary",
             )}
           >
-            {tab}
+            {tab.label}
           </button>
         ))}
       </div>
