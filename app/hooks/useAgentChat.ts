@@ -1,8 +1,19 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { Attachment, Message, ToolCallBlock } from "@/app/actions/chat";
+import type { Attachment, Message } from "@/app/actions/chat";
 import { getModelByID } from "@/app/lib/models";
+import {
+  buildStreamURL,
+  emptyStreamState,
+  reduceAgentEvent,
+  streamStateToMessagePatch,
+  type AgentEvent,
+  type AgentStreamState,
+  type PendingConfirmation,
+} from "@/app/lib/agentEvents";
+
+export type { PendingConfirmation } from "@/app/lib/agentEvents";
 
 const API_BASE = "/api/v1/agent";
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -10,23 +21,6 @@ const RECONNECT_BACKOFF_MIN_MS = 500;
 const RECONNECT_BACKOFF_MAX_MS = 8000;
 
 type StreamMode = "fresh" | "reconnect-mount" | "resume";
-
-export interface PendingConfirmation {
-  confirmationID: string;
-  actionName: string;
-  args: Record<string, unknown>;
-  message: string;
-  threadID: string;
-}
-
-interface AgentEvent {
-  type: string;
-  runID: string;
-  threadID: string;
-  timestamp: number;
-  data: unknown;
-  streamID?: string;
-}
 
 interface UseAgentChatOptions {
   initialMessages?: Message[];
@@ -45,7 +39,6 @@ interface UseAgentChatReturn {
   setModel: (model: string) => void;
   sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   stopGeneration: () => void;
-  setMessages: (messages: Message[]) => void;
   queue: string[];
   dismissFromQueue: (index: number) => void;
   pendingConfirmations: PendingConfirmation[];
@@ -76,6 +69,39 @@ export function useAgentChat(
   const [model, setModelState] = useState<string | null>(
     options.initialModel ?? null,
   );
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const [pendingConfirmations, setPendingConfirmations] = useState<
+    PendingConfirmation[]
+  >([]);
+
+  // Latest options snapshot — read by the chat-switch reset effect so that
+  // re-renders with a fresh initialMessages array reference don't re-trigger
+  // the reset (it's only meaningful when chatID actually changes).
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  // Single stream state — replaces 8 separate refs from the previous design.
+  // The pure reducer in `agentEvents.ts` owns the transition; the hook only
+  // dispatches events into it and projects the result into React state.
+  const streamStateRef = useRef<AgentStreamState>(emptyStreamState());
+
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const sendingRef = useRef(false);
+  const assistantIdRef = useRef("");
+  const reconnectingRef = useRef(false);
+  const replayingRef = useRef(false);
+  const lastEventIDRef = useRef<string | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of pendingConfirmations for stale-closure-safe reads inside the
+  // long-lived stream callbacks (which can fire after retries delay them).
+  const pendingConfirmationsRef = useRef<PendingConfirmation[]>([]);
+  useEffect(() => {
+    pendingConfirmationsRef.current = pendingConfirmations;
+  }, [pendingConfirmations]);
+
+  const prevChatIDRef = useRef(options.chatID);
 
   useEffect(() => {
     if (!options.initialModel) {
@@ -92,35 +118,8 @@ export function useAgentChat(
     setModelState(value);
     localStorage.setItem("sera:lastModel", value);
   }, []);
-  const [queue, setQueue] = useState<QueuedMessage[]>([]);
-  const [pendingConfirmations, setPendingConfirmations] = useState<
-    PendingConfirmation[]
-  >([]);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const sendingRef = useRef(false);
-  const assistantContentRef = useRef("");
-  const assistantIdRef = useRef("");
-  const thinkingContentRef = useRef("");
-  const thinkingDoneRef = useRef(false);
-  const thinkingStartTimeRef = useRef<number | null>(null);
-  const thinkingDurationRef = useRef<number | undefined>(undefined);
-  const toolCallsRef = useRef<ToolCallBlock[]>([]);
-  const reconnectingRef = useRef(false);
-  const replayingRef = useRef(false);
-  const replayConfirmationsRef = useRef<PendingConfirmation[]>([]);
-  const replayTerminalRef = useRef<AgentEvent | null>(null);
-  const lastEventIDRef = useRef<string | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Mirror of pendingConfirmations for stale-closure-safe reads inside the
-  // long-lived stream callbacks (which can fire after retries delay them).
-  const pendingConfirmationsRef = useRef<PendingConfirmation[]>([]);
-
-  const prevChatIDRef = useRef(options.chatID);
-
-  const cleanup = useCallback(() => {
+  const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -129,41 +128,65 @@ export function useAgentChat(
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    reconnectAttemptsRef.current = 0;
-    lastEventIDRef.current = null;
-    abortRef.current = null;
   }, []);
 
-  useEffect(() => {
-    pendingConfirmationsRef.current = pendingConfirmations;
-  }, [pendingConfirmations]);
+  // Non-terminal teardown: chat switch, stop generation, send-failure.
+  // Aborts the in-flight POST and zeroes the resume cursor — the next stream
+  // subscription starts fresh.
+  const cleanup = useCallback(() => {
+    closeStream();
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
+    lastEventIDRef.current = null;
+  }, [closeStream]);
 
-  // Reset all state when switching chats
+  // Terminal teardown: the run finished cleanly via run.completed / failed /
+  // cancelled. Closes the socket and clears loading, but leaves the resume
+  // cursor untouched (it's irrelevant — the run is over).
+  const finishRun = useCallback(() => {
+    closeStream();
+    sendingRef.current = false;
+    reconnectingRef.current = false;
+    replayingRef.current = false;
+    setIsLoading(false);
+  }, [closeStream]);
+
+  const updateAssistantMessage = useCallback((patch: Partial<Message>) => {
+    const id = assistantIdRef.current;
+    if (!id) return;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+    );
+  }, []);
+
+  // Reset all state when switching chats. Keyed solely on chatID — other
+  // options are read via optionsRef so a fresh initialMessages array
+  // reference doesn't re-trigger the reset on unrelated parent renders.
   useEffect(() => {
     if (options.chatID === prevChatIDRef.current) return;
     prevChatIDRef.current = options.chatID;
 
+    const o = optionsRef.current;
     cleanup();
-    setMessages(options.initialMessages ?? []);
-    setChatID(options.chatID ?? null);
-    setThreadID(options.threadID ?? null);
+    streamStateRef.current = emptyStreamState();
+    setMessages(o.initialMessages ?? []);
+    setChatID(o.chatID ?? null);
+    setThreadID(o.threadID ?? null);
     setRunID(null);
     setIsLoading(false);
     setQueue([]);
     setPendingConfirmations([]);
     sendingRef.current = false;
     reconnectingRef.current = false;
+    assistantIdRef.current = "";
 
-    if (options.initialModel) {
-      setModelState(options.initialModel);
+    if (o.initialModel) {
+      setModelState(o.initialModel);
     }
-  }, [
-    options.chatID,
-    options.initialMessages,
-    options.threadID,
-    options.initialModel,
-    cleanup,
-  ]);
+  }, [options.chatID, cleanup]);
 
   const stopGeneration = useCallback(() => {
     if (runID) {
@@ -174,299 +197,17 @@ export function useAgentChat(
     setIsLoading(false);
   }, [runID, cleanup]);
 
-  const updateAssistantMessage = useCallback((patch: Partial<Message>) => {
-    const id = assistantIdRef.current;
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...patch } : m)),
-    );
-  }, []);
-
-  const handleEvent = useCallback(
-    (event: AgentEvent) => {
-      const replaying = replayingRef.current;
-
-      switch (event.type) {
-        case "thinking.delta": {
-          const { content } = event.data as { content: string };
-          thinkingContentRef.current += content;
-          if (!replaying) {
-            if (thinkingStartTimeRef.current === null) {
-              thinkingStartTimeRef.current = Date.now();
-            }
-            updateAssistantMessage({ thinking: thinkingContentRef.current });
-          } else if (thinkingStartTimeRef.current === null) {
-            thinkingStartTimeRef.current = event.timestamp;
-          }
-          break;
-        }
-
-        case "thinking.done": {
-          const { content } = event.data as { content: string };
-          if (content) thinkingContentRef.current = content;
-          thinkingDoneRef.current = true;
-          if (!replaying) {
-            if (thinkingStartTimeRef.current !== null) {
-              thinkingDurationRef.current = Math.round(
-                (Date.now() - thinkingStartTimeRef.current) / 1000,
-              );
-            }
-            updateAssistantMessage({
-              thinking: thinkingContentRef.current,
-              thinkingDuration: thinkingDurationRef.current,
-            });
-          } else if (thinkingStartTimeRef.current !== null) {
-            thinkingDurationRef.current = Math.round(
-              (event.timestamp - thinkingStartTimeRef.current) / 1000,
-            );
-          }
-          break;
-        }
-
-        case "text.delta": {
-          const { content } = event.data as { content: string };
-          assistantContentRef.current += content;
-          if (!replaying) {
-            updateAssistantMessage({ content: assistantContentRef.current });
-          }
-          break;
-        }
-
-        case "text.done": {
-          const { content } = event.data as { content: string };
-          if (content) assistantContentRef.current = content;
-          if (!replaying) {
-            updateAssistantMessage({ content: assistantContentRef.current });
-          }
-          break;
-        }
-
-        case "run.completed": {
-          if (replaying) {
-            replayTerminalRef.current = event;
-            break;
-          }
-          const { response } = event.data as { response: string };
-          if (response && !assistantContentRef.current) {
-            updateAssistantMessage({ content: response });
-          }
-          sendingRef.current = false;
-          reconnectingRef.current = false;
-          cleanup();
-          setIsLoading(false);
-          break;
-        }
-
-        case "run.failed": {
-          if (replaying) {
-            replayTerminalRef.current = event;
-            break;
-          }
-          const { error } = event.data as { error: string };
-          const id = assistantIdRef.current;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id
-                ? { ...m, content: m.content || `Error: ${error}` }
-                : m,
-            ),
-          );
-          sendingRef.current = false;
-          reconnectingRef.current = false;
-          cleanup();
-          setIsLoading(false);
-          break;
-        }
-
-        case "run.cancelled": {
-          if (replaying) {
-            replayTerminalRef.current = event;
-            break;
-          }
-          const { reason } = event.data as { reason?: string };
-          const id = assistantIdRef.current;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id
-                ? { ...m, content: m.content || reason || "Run cancelled." }
-                : m,
-            ),
-          );
-          sendingRef.current = false;
-          reconnectingRef.current = false;
-          cleanup();
-          setIsLoading(false);
-          break;
-        }
-
-        case "confirmation.required": {
-          const { confirmationID, actionName, args, message } = event.data as {
-            confirmationID: string;
-            actionName: string;
-            args: Record<string, unknown>;
-            message: string;
-          };
-          if (replaying) {
-            replayConfirmationsRef.current.push({
-              confirmationID,
-              actionName,
-              args,
-              message,
-              threadID: event.threadID,
-            });
-          } else {
-            setPendingConfirmations((prev) => [
-              ...prev,
-              {
-                confirmationID,
-                actionName,
-                args,
-                message,
-                threadID: event.threadID,
-              },
-            ]);
-          }
-          break;
-        }
-
-        case "confirmation.resolved": {
-          const { confirmationID } = event.data as { confirmationID: string };
-          if (replaying) {
-            replayConfirmationsRef.current =
-              replayConfirmationsRef.current.filter(
-                (c) => c.confirmationID !== confirmationID,
-              );
-          } else {
-            setPendingConfirmations((prev) =>
-              prev.filter((c) => c.confirmationID !== confirmationID),
-            );
-          }
-          break;
-        }
-
-        case "tool_call.started": {
-          const { toolCallID, toolName, args } = event.data as {
-            toolCallID: string;
-            toolName: string;
-            args: Record<string, unknown>;
-          };
-          toolCallsRef.current = [
-            ...toolCallsRef.current,
-            { toolCallID, toolName, args, status: "started" },
-          ];
-          if (!replaying) {
-            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-          }
-          break;
-        }
-
-        case "tool_call.executing": {
-          const { toolCallID } = event.data as { toolCallID: string };
-          toolCallsRef.current = toolCallsRef.current.map((tc) =>
-            tc.toolCallID === toolCallID ? { ...tc, status: "executing" } : tc,
-          );
-          if (!replaying) {
-            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-          }
-          break;
-        }
-
-        case "tool_call.result": {
-          const { toolCallID, result } = event.data as {
-            toolCallID: string;
-            result: unknown;
-          };
-          toolCallsRef.current = toolCallsRef.current.map((tc) =>
-            tc.toolCallID === toolCallID
-              ? { ...tc, status: "completed", result }
-              : tc,
-          );
-          if (!replaying) {
-            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-          }
-          break;
-        }
-
-        case "tool_call.error": {
-          const { toolCallID, error } = event.data as {
-            toolCallID: string;
-            error: string;
-          };
-          toolCallsRef.current = toolCallsRef.current.map((tc) =>
-            tc.toolCallID === toolCallID
-              ? { ...tc, status: "failed", error }
-              : tc,
-          );
-          if (!replaying) {
-            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-          }
-          break;
-        }
-
-        case "subagent.spawned": {
-          const { toolCallID, subagentRunID, subagentThreadID, agentID, goal } =
-            event.data as {
-              toolCallID: string;
-              subagentRunID: string;
-              subagentThreadID: string;
-              agentID: string;
-              goal: string;
-            };
-          toolCallsRef.current = toolCallsRef.current.map((tc) =>
-            tc.toolCallID === toolCallID
-              ? {
-                  ...tc,
-                  isSubagent: true,
-                  subagentMeta: {
-                    runID: subagentRunID,
-                    threadID: subagentThreadID,
-                    agentID,
-                    goal,
-                  },
-                }
-              : tc,
-          );
-          if (!replaying) {
-            updateAssistantMessage({ toolCalls: [...toolCallsRef.current] });
-          }
-          break;
-        }
-
-        case "subagent.completed":
-        case "subagent.failed":
-          break;
-
-        case "plan.created":
-        case "plan.step_updated":
-        case "evaluation.done":
-        case "error":
-          break;
-      }
-    },
-    [cleanup, updateAssistantMessage],
-  );
-
   const flushReplay = useCallback(() => {
     replayingRef.current = false;
+    const state = streamStateRef.current;
 
-    updateAssistantMessage({
-      content: assistantContentRef.current,
-      thinking: thinkingContentRef.current || undefined,
-      thinkingDuration: thinkingDurationRef.current,
-      toolCalls:
-        toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
-    });
+    updateAssistantMessage(streamStateToMessagePatch(state));
+    setPendingConfirmations(state.confirmations);
 
-    if (replayConfirmationsRef.current.length > 0) {
-      setPendingConfirmations(replayConfirmationsRef.current);
-      replayConfirmationsRef.current = [];
+    if (state.terminal) {
+      finishRun();
     }
-
-    const terminal = replayTerminalRef.current;
-    replayTerminalRef.current = null;
-    if (terminal) {
-      handleEvent(terminal);
-    }
-  }, [updateAssistantMessage, handleEvent]);
+  }, [updateAssistantMessage, finishRun]);
 
   const subscribeToStream = useCallback(
     (streamRunID: string, mode: StreamMode = "fresh") => {
@@ -476,60 +217,72 @@ export function useAgentChat(
       assistantIdRef.current = assistantIdRef.current || crypto.randomUUID();
 
       if (!preserveLiveState) {
-        assistantContentRef.current = "";
-        thinkingContentRef.current = "";
-        thinkingDoneRef.current = false;
-        thinkingStartTimeRef.current = null;
-        thinkingDurationRef.current = undefined;
-        toolCallsRef.current = [];
+        streamStateRef.current = emptyStreamState();
         lastEventIDRef.current = null;
         reconnectAttemptsRef.current = 0;
+      } else if (isReplay) {
+        // Seed the replay accumulator's confirmations with the current live
+        // set so any confirmation.resolved events arriving in the replay
+        // apply against the right baseline.
+        streamStateRef.current = {
+          ...streamStateRef.current,
+          confirmations: [...pendingConfirmationsRef.current],
+          terminal: null,
+        };
       }
       replayingRef.current = isReplay;
-      // On resume, seed the replay accumulator with the live set so missed
-      // adds/resolves apply on top — flushReplay replaces wholesale.
-      replayConfirmationsRef.current = preserveLiveState
-        ? [...pendingConfirmationsRef.current]
-        : [];
-      replayTerminalRef.current = null;
 
       setIsLoading(true);
 
-      const cursor = preserveLiveState ? (lastEventIDRef.current ?? "0") : "0";
-      const url =
-        cursor === "0"
-          ? `${API_BASE}/stream/${streamRunID}`
-          : `${API_BASE}/stream/${streamRunID}?last-event-id=${encodeURIComponent(cursor)}`;
-
-      const es = new EventSource(url);
+      const cursor = preserveLiveState ? lastEventIDRef.current : null;
+      const es = new EventSource(buildStreamURL(streamRunID, cursor));
       eventSourceRef.current = es;
 
-      es.onmessage = (event) => {
+      es.onmessage = (e) => {
+        let agentEvent: AgentEvent;
         try {
-          const agentEvent: AgentEvent = JSON.parse(event.data);
-
-          // Any message proves the socket is healthy — clear retry counter.
-          reconnectAttemptsRef.current = 0;
-
-          if (agentEvent.type === "replay.done") {
-            flushReplay();
-            return;
-          }
-
-          if (agentEvent.streamID) {
-            lastEventIDRef.current = agentEvent.streamID;
-          }
-
-          handleEvent(agentEvent);
+          agentEvent = JSON.parse(e.data);
         } catch {
-          // Ignore malformed events
+          console.warn("[useAgentChat] Ignoring malformed event:", e.data);
+          return;
+        }
+
+        // Any message proves the socket is healthy — clear retry counter.
+        reconnectAttemptsRef.current = 0;
+
+        if (agentEvent.type === "replay.done") {
+          flushReplay();
+          return;
+        }
+
+        if (agentEvent.type === "error") {
+          console.warn("[useAgentChat] Server error event:", agentEvent.data);
+        }
+
+        if (agentEvent.streamID) {
+          lastEventIDRef.current = agentEvent.streamID;
+        }
+
+        const prev = streamStateRef.current;
+        const next = reduceAgentEvent(prev, agentEvent, {
+          mode: replayingRef.current ? "replay" : "live",
+          nowMs: Date.now(),
+        });
+        streamStateRef.current = next;
+
+        if (replayingRef.current) return;
+
+        if (prev.confirmations !== next.confirmations) {
+          setPendingConfirmations(next.confirmations);
+        }
+        updateAssistantMessage(streamStateToMessagePatch(next));
+
+        if (!prev.terminal && next.terminal) {
+          finishRun();
         }
       };
 
       es.onerror = () => {
-        // EventSource sets readyState to CONNECTING when the browser is
-        // attempting its own native reconnect. Defer to it; onerror will fire
-        // again with CLOSED if that gives up.
         if (es.readyState !== EventSource.CLOSED) return;
 
         if (eventSourceRef.current === es) {
@@ -537,8 +290,6 @@ export function useAgentChat(
         }
         es.close();
 
-        // If the run already wrapped up via a terminal event, terminal-branch
-        // cleanup has already cleared these flags. Nothing to recover.
         if (!sendingRef.current && !reconnectingRef.current) {
           replayingRef.current = false;
           setIsLoading(false);
@@ -566,7 +317,7 @@ export function useAgentChat(
         }, delay);
       };
     },
-    [handleEvent, flushReplay],
+    [updateAssistantMessage, flushReplay, finishRun],
   );
 
   const sendMessage = useCallback(
@@ -586,8 +337,9 @@ export function useAgentChat(
         createdAt: new Date(),
       };
 
-      const currentMessages = [...messages, userMessage];
-      setMessages(currentMessages);
+      // Functional update — no closure dependency on `messages`, so this
+      // callback's identity is stable across renders.
+      setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
 
       try {
@@ -599,7 +351,7 @@ export function useAgentChat(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: content,
-            attachmentIDs: attachments.map((attachment) => attachment.id),
+            attachmentIDs: attachments.map((a) => a.id),
             chatID: chatID ?? undefined,
             threadID: threadID ?? undefined,
             model: model ?? undefined,
@@ -621,14 +373,12 @@ export function useAgentChat(
         setThreadID(newThreadID);
 
         assistantIdRef.current = crypto.randomUUID();
-
         const assistantMessage: Message = {
           id: assistantIdRef.current,
           role: "assistant",
           content: "",
           createdAt: new Date(),
         };
-
         setMessages((prev) => [...prev, assistantMessage]);
         subscribeToStream(newRunID);
       } catch (error) {
@@ -641,7 +391,7 @@ export function useAgentChat(
         setIsLoading(false);
       }
     },
-    [messages, chatID, threadID, model, cleanup, subscribeToStream],
+    [chatID, threadID, model, cleanup, subscribeToStream],
   );
 
   // Check for an active run on mount (handles page refresh mid-stream)
@@ -663,7 +413,6 @@ export function useAgentChat(
         setRunID(data.runID);
         setThreadID(data.threadID);
 
-        // Create a placeholder assistant message for the reconnected stream
         assistantIdRef.current = crypto.randomUUID();
         const placeholder: Message = {
           id: assistantIdRef.current,
@@ -684,7 +433,7 @@ export function useAgentChat(
 
   const resolveConfirmation = useCallback(
     async (confirmationID: string, approved: boolean, feedback?: string) => {
-      const confirmation = pendingConfirmations.find(
+      const confirmation = pendingConfirmationsRef.current.find(
         (c) => c.confirmationID === confirmationID,
       );
       if (!confirmation) return;
@@ -710,14 +459,14 @@ export function useAgentChat(
         console.error("[useAgentChat] Failed to resolve confirmation:", err);
       }
     },
-    [pendingConfirmations],
+    [],
   );
 
   const dismissFromQueue = useCallback((index: number) => {
     setQueue((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // Dequeue next message when the current run completes
+  // Dequeue next message when the current run completes.
   useEffect(() => {
     if (!isLoading && queue.length > 0 && !sendingRef.current) {
       const [next, ...rest] = queue;
@@ -736,7 +485,6 @@ export function useAgentChat(
     setModel,
     sendMessage,
     stopGeneration,
-    setMessages,
     queue: queue.map((item) => item.content),
     dismissFromQueue,
     pendingConfirmations,

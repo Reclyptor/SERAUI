@@ -748,7 +748,6 @@ interface UseAgentChatReturn {
   setModel: (model: string) => void;
   sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   stopGeneration: () => void;
-  setMessages: (messages: Message[]) => void;
   queue: string[]; // Display labels for pending user messages
   dismissFromQueue: (index: number) => void;
   pendingConfirmations: PendingConfirmation[];
@@ -779,13 +778,16 @@ Constants:
 
 #### Chat-switch Reset
 
-A `prevChatIDRef` tracks the last seen `options.chatID`. When it changes, the hook:
+A `prevChatIDRef` tracks the last seen `options.chatID`. The effect is keyed **only** on `options.chatID` (and `cleanup`); `initialMessages` / `threadID` / `initialModel` are read off an `optionsRef` mirror so a parent re-render that hands in a fresh array reference doesn't re-trigger the reset.
 
-1. Closes any open `EventSource` and abort controller.
-2. Resets `messages` to `options.initialMessages ?? []`.
-3. Resets `chatID`, `threadID`, `runID`, `isLoading`, `queue`, `pendingConfirmations`.
-4. Clears `sendingRef` and `reconnectingRef`.
-5. If `options.initialModel` is now set, adopts it.
+When `options.chatID` actually changes, the hook:
+
+1. Calls `cleanup()` — closes the `EventSource`, clears the reconnect timer, aborts the in-flight `POST /chat` (if any), and zeroes the resume cursor.
+2. Resets `streamStateRef` to `emptyStreamState()` and clears `assistantIdRef`.
+3. Resets `messages` to `optionsRef.current.initialMessages ?? []`.
+4. Resets `chatID`, `threadID`, `runID`, `isLoading`, `queue`, `pendingConfirmations`.
+5. Clears `sendingRef` and `reconnectingRef`.
+6. If `optionsRef.current.initialModel` is set, adopts it.
 
 This effect is what makes navigation from `/chat/A` → `/chat/B` cleanly load B's history.
 
@@ -803,16 +805,19 @@ On `AbortError`, the catch path silently returns. Any other error logs and reset
 
 #### Stream Subscription
 
-`subscribeToStream(streamRunID, replay = false)` clears all stream refs (`assistantContentRef`, `thinkingContentRef`, `toolCallsRef`, etc.), opens `new EventSource(${API_BASE}/stream/${streamRunID})`, and routes events:
+`subscribeToStream(streamRunID, mode: "fresh" | "reconnect-mount" | "resume" = "fresh")` resets the single `streamStateRef: AgentStreamState` (or seeds it from the live confirmations for `resume`), opens `new EventSource(buildStreamURL(streamRunID, cursor))`, and routes events:
 
-- `replay.done` triggers `flushReplay()`.
-- All other events are dispatched through `handleEvent(agentEvent)`.
+- `replay.done` triggers `flushReplay()`, which paints the accumulated state in one batch.
+- `error` events are logged via `console.warn` (otherwise ignored — see §10.2).
+- All other events are dispatched through `reduceAgentEvent(streamStateRef.current, event, { mode, nowMs })`, the pure reducer in `app/lib/agentEvents.ts`. The reducer returns a new `AgentStreamState`; the hook stores it in `streamStateRef` and (in live mode only) projects it onto the assistant message via `streamStateToMessagePatch`. When `state.terminal` transitions from `null` to set, the hook calls `finishRun()` (close socket, clear loading, clear sending/reconnecting flags) — **without** zeroing the resume cursor, since the run is over.
+
+`buildStreamURL(runID, cursor)` returns `/api/v1/agent/stream/<runID>` for a fresh subscription, or `/api/v1/agent/stream/<runID>?last-event-id=<cursor>` when resuming. Both `runID` and `cursor` are URL-encoded.
 
 Every dispatched event updates `lastEventIDRef.current = event.streamID` if `streamID` is present. This cursor is what subsequent reconnect attempts use to resume without replaying from the start.
 
 On `onmessage`, the hook also clears `reconnectAttemptsRef.current = 0` — the first successful message after a transient drop tells us connectivity is healthy again.
 
-Malformed JSON is silently ignored.
+Malformed JSON is dropped with a `console.warn`.
 
 #### Resume-on-Error
 
@@ -832,10 +837,11 @@ Terminal events (`run.completed` / `run.failed` / `run.cancelled`) reset both `r
 
 #### Replay vs. Live Mode
 
-`replayingRef.current` distinguishes a fresh run (`false`) from a reconnect-during-stream replay (`true`).
+`replayingRef.current` distinguishes a fresh run (`false`) from a reconnect-during-stream replay (`true`). The pure reducer takes `mode: "live" | "replay"` and behaves identically except for two timing choices:
 
-- In **live mode**, every event mutates `messages` via `updateAssistantMessage` immediately.
-- In **replay mode**, events accumulate into refs (`assistantContentRef`, `thinkingContentRef`, `toolCallsRef`, `replayConfirmationsRef`, `replayTerminalRef`) without touching React state. The single `flushReplay()` call applies the accumulated snapshot in one batch, then forwards any captured terminal event (`run.completed` / `run.failed` / `run.cancelled`) to `handleEvent`.
+- Thinking duration uses `Date.now()` in live mode and `event.timestamp` in replay mode, so a replayed thinking block reports the original wall-clock duration.
+- In **live mode**, after each reducer call the hook patches the assistant message via `updateAssistantMessage(streamStateToMessagePatch(next))` and (if changed) updates `pendingConfirmations`.
+- In **replay mode**, the hook only updates `streamStateRef`; no React state writes until `replay.done` arrives. `flushReplay()` then paints the entire accumulated state in one batch and, if a terminal event was captured in `state.terminal`, calls `finishRun()`.
 
 This keeps the screen from flickering while SSE replays the entire run history on reconnect.
 
@@ -901,11 +907,11 @@ SSE comment lines (`: ping <epoch>\n\n`) sent by SERA every 15s during idle stre
 | `subagent.spawned`      | Yes                       | Marks the matching tool call `isSubagent: true` and attaches `subagentMeta`.                                     |
 | `replay.done`           | N/A                       | Triggers `flushReplay()`.                                                                                        |
 
-The hook explicitly receives but ignores: `subagent.completed`, `subagent.failed`, `plan.created`, `plan.step_updated`, `evaluation.done`, `error`. These events are still recorded by SERA and may be consumed in a future UI revision.
+The hook explicitly receives but ignores: `subagent.completed`, `subagent.failed`, `plan.created`, `plan.step_updated`, `evaluation.done`. The `error` event is also ignored by the reducer but the hook emits `console.warn("[useAgentChat] Server error event:", data)` so production debugging isn't blind. These events are still recorded by SERA and may be consumed in a future UI revision.
 
 ### 10.3 Thinking Duration
 
-`thinking.delta` starts a wall-clock timer on the first delta. On `thinking.done` the hook computes `Math.round((Date.now() - thinkingStartTime) / 1000)` (live mode) or `Math.round((event.timestamp - thinkingStartTime) / 1000)` (replay mode) and stores it as `thinkingDuration`. `ThinkingMessage` formats it as `Thought for {duration}s`.
+`thinking.delta` starts a wall-clock timer on the first delta (using `Date.now()` in live mode, `event.timestamp` in replay mode). On `thinking.done` the reducer computes `computeThinkingDuration(start, end)` = `Math.max(1, Math.round((end - start) / 1000))` and stores it as `thinkingDuration`. The `Math.max(1, ...)` ensures a sub-second thinking block renders as `Thought for 1s` instead of the previous `Thought for 0s`.
 
 ### 10.4 Assistant Message Identity
 
