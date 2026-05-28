@@ -684,13 +684,15 @@ Mounted inside `AuthProvider`. Exposes:
 interface ImageCacheContextType {
   addImage: (id: string, preview: string, mimeType: string) => void;
   getImage: (id: string) => CachedImage | undefined;
-  clearOldImages: () => void;
+  enforceImageCap: () => void;
 }
 ```
 
-Storage is a `Map<string, CachedImage>` held in `useState`. `clearOldImages()` is a memory ceiling, not a TTL — it uses a functional state update and, when the latest map exceeds 50 entries, slices to the most recent 50 by insertion order (via `Array.from(prev.entries()).slice(-50)`). Throws if used outside the provider.
+Storage is a `Map<string, CachedImage>` held in `useState`, mirrored to an `imagesRef` (synced in an effect) so `getImage` reads the latest map even when called from a callback that closed over an older `images`. All three callbacks are wrapped in `useCallback` and the context value in `useMemo`, so consumer memoization isn't busted on every provider render.
 
-Consumers: `ImageUploadInput` (writes image previews on send, calls `clearOldImages` after batch upload) and `ChatMessage` user variant (reads previews when rendering image attachments).
+`enforceImageCap()` is a memory ceiling, not a TTL — it delegates to `trimMap(prev, 50)` from `app/lib/collections.ts`, which keeps the most recently inserted 50 entries by insertion order. `trimMap` is unit-tested in `app/lib/collections.test.ts` (the test surfaced a `slice(-0)` bug — `length - max` is used instead). Throws if used outside the provider.
+
+Consumers: `ImageUploadInput` (writes image previews on send, calls `enforceImageCap` after batch upload) and `ChatMessage` user variant (reads previews when rendering image attachments).
 
 ---
 

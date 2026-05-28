@@ -1,6 +1,16 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { trimMap } from "@/app/lib/collections";
 
 interface CachedImage {
   id: string;
@@ -8,41 +18,57 @@ interface CachedImage {
   mimeType: string;
 }
 
+const IMAGE_CAP = 50;
+
 interface ImageCacheContextType {
   addImage: (id: string, preview: string, mimeType: string) => void;
   getImage: (id: string) => CachedImage | undefined;
-  clearOldImages: () => void;
+  enforceImageCap: () => void;
 }
 
-const ImageCacheContext = createContext<ImageCacheContextType | undefined>(undefined);
+const ImageCacheContext = createContext<ImageCacheContextType | undefined>(
+  undefined,
+);
 
 export function ImageCacheProvider({ children }: { children: ReactNode }) {
   const [images, setImages] = useState<Map<string, CachedImage>>(new Map());
 
-  const addImage = (id: string, preview: string, mimeType: string) => {
-    setImages(prev => {
-      const next = new Map(prev);
-      next.set(id, { id, preview, mimeType });
-      return next;
-    });
-  };
+  // Ref mirror so getImage reads the latest map even when called outside
+  // render (e.g. from a stream callback that closed over an old `images`).
+  const imagesRef = useRef(images);
+  useEffect(() => {
+    imagesRef.current = images;
+  }, [images]);
 
-  const getImage = (id: string): CachedImage | undefined => {
-    return images.get(id);
-  };
+  const addImage = useCallback(
+    (id: string, preview: string, mimeType: string) => {
+      setImages((prev) => {
+        const next = new Map(prev);
+        next.set(id, { id, preview, mimeType });
+        return next;
+      });
+    },
+    [],
+  );
 
-  const clearOldImages = () => {
-    // Keep only last 50 images to prevent memory leak
-    setImages((prev) => {
-      if (prev.size <= 50) return prev;
-      const entries = Array.from(prev.entries());
-      const toKeep = entries.slice(-50);
-      return new Map(toKeep);
-    });
-  };
+  const getImage = useCallback(
+    (id: string) => imagesRef.current.get(id),
+    [],
+  );
+
+  // Caps the cache at IMAGE_CAP entries. Named for what it actually does —
+  // the previous "clearOldImages" suggested a TTL but it's a memory ceiling.
+  const enforceImageCap = useCallback(() => {
+    setImages((prev) => trimMap(prev, IMAGE_CAP));
+  }, []);
+
+  const value = useMemo(
+    () => ({ addImage, getImage, enforceImageCap }),
+    [addImage, getImage, enforceImageCap],
+  );
 
   return (
-    <ImageCacheContext.Provider value={{ addImage, getImage, clearOldImages }}>
+    <ImageCacheContext.Provider value={value}>
       {children}
     </ImageCacheContext.Provider>
   );

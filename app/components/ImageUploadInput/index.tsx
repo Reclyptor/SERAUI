@@ -40,7 +40,7 @@ export function ImageUploadInput({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { addImage, clearOldImages } = useImageCache();
+  const { addImage, enforceImageCap } = useImageCache();
 
   const createPreview = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -128,7 +128,7 @@ export function ImageUploadInput({
         }),
       );
 
-      clearOldImages();
+      enforceImageCap();
 
       setMessage("");
       setAttachments([]);

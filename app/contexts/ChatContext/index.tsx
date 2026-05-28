@@ -44,15 +44,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      refreshChats().finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    }, 0);
+    // setIsLoading fires only after the async fetch resolves, so the
+    // rule's cascading-render concern doesn't apply. This is the
+    // canonical "load data on mount, flip loading off when done" shape.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshChats().finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeout);
     };
   }, [refreshChats]);
 
