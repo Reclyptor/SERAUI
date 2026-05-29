@@ -9,8 +9,8 @@ import { ChatInputTextarea } from "../ChatInputTextarea";
 
 interface WelcomeViewProps {
   onSend: (message: string) => void;
-  selectedModel: string;
-  onModelChange: (modelId: string) => void;
+  selectedModel: string | null;
+  onModelChange: (spec: string) => void;
   selectedAgentID: string | null;
   onAgentChange: (agentID: string | null) => void;
 }

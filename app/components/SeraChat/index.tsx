@@ -7,7 +7,6 @@ import { ChatMessage } from "../ChatMessage";
 import { ConfirmationCard } from "../ConfirmationCard";
 import { ImageUploadInput } from "../ImageUploadInput";
 import { WelcomeView } from "../WelcomeView";
-import { DEFAULT_MODEL } from "@/app/lib/models";
 import type { Message } from "@/app/actions/chat";
 
 interface SeraChatProps {
@@ -74,7 +73,7 @@ export function SeraChat({
       <div className="flex h-full w-full flex-col bg-background">
         <WelcomeView
           onSend={sendMessage}
-          selectedModel={model ?? DEFAULT_MODEL}
+          selectedModel={model}
           onModelChange={setModel}
           selectedAgentID={agentID}
           onAgentChange={setAgentID}
@@ -133,7 +132,7 @@ export function SeraChat({
           onStop={stopGeneration}
           queue={queue}
           onDismissFromQueue={dismissFromQueue}
-          selectedModel={model ?? DEFAULT_MODEL}
+          selectedModel={model}
           onModelChange={setModel}
           selectedAgentID={agentID}
           onAgentChange={setAgentID}

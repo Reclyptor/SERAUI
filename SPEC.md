@@ -1209,41 +1209,77 @@ Remove button is rendered only when `onRemove` is supplied. It is positioned `-t
 
 ## 12. Models
 
-Defined in `app/lib/models.ts` (client-safe — used directly by `ModelSelector` and `useAgentChat`).
+The model catalog is owned by **SERA**, not SERAUI. SERA persists it in the Mongo `models` collection, caches reads in Redis (300s TTL), and exposes CRUD at `/api/v1/models`. SERAUI fetches the enabled subset per-request from SERA and threads it through React Context to the client tree. There is no hardcoded list in SERAUI.
+
+### 12.1 Data flow
+
+```
+Mongo `models` ──► Redis cache (300s) ──► SERA `GET /api/v1/models?enabled=true`
+                                                          │
+                                                          ▼
+                                       SERAUI server action `listModels()`
+                                       (app/actions/models.ts, forwards
+                                        session cookie via seraFetch)
+                                                          │
+                                                          ▼
+                                      `<ModelCatalogProvider initialCatalog>`
+                                                          │
+                                       ┌──────────────────┼──────────────────┐
+                                       ▼                  ▼                  ▼
+                              useModelCatalog()   useModelCatalog()   useModelCatalog()
+                              <ModelSelector>     <SeraChat>          <useAgentChat>
+```
+
+### 12.2 Catalog row shape
+
+`app/lib/models.ts` mirrors SERA's `ModelCatalogEntry`:
 
 ```ts
 interface ModelOption {
-  id: string;
-  name: string;
-  provider: string;
-  label: string;
+  spec: string;           // canonical "provider/modelID" e.g. "anthropic/claude-sonnet-4-6"
+  provider: string;       // backend provider id (anthropic | openai | google | vllm | ...)
+  modelID: string;        // last segment of spec
+  displayName: string;
+  enabled: boolean;
+  contextWindow?: number;
 }
 ```
 
-| ID                                    | Display Name             | Provider    | Group Label |
-| ------------------------------------- | ------------------------ | ----------- | ----------- |
-| `anthropic/claude-haiku-4-5`          | Haiku 4.5                | `anthropic` | Claude      |
-| `anthropic/claude-sonnet-4-6`         | Sonnet 4.6               | `anthropic` | Claude      |
-| `anthropic/claude-opus-4-7`           | Opus 4.7                 | `anthropic` | Claude      |
-| `openai/gpt-4o-mini`                  | GPT-4o Mini              | `openai`    | ChatGPT     |
-| `openai/gpt-4o`                       | GPT-4o                   | `openai`    | ChatGPT     |
-| `openai/o3`                           | o3                       | `openai`    | ChatGPT     |
-| `google/gemini-2.0-flash`             | Gemini 2.0 Flash         | `google`    | Gemini      |
-| `vllm/Qwen3.6-27B-FP8`                | Qwen 3.6 27B FP8         | `vllm`      | vLLM        |
-| `vllm/Huihui-Qwen3.6-27B-abliterated` | Qwen 3.6 27B Abliterated | `vllm`      | vLLM        |
+Group headers in `<ModelSelector>` render the raw `provider` value (`anthropic`, `openai`, `google`, `vllm`, etc.) verbatim — there is no client-side label mapping. If a friendlier name is wanted, add it as a field on SERA's `ModelCatalogEntry` so the data drives the UI.
 
-`DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"` has a single consumer:
+### 12.3 Server action
 
-- `SeraChat` reads it at two call sites — when rendering `<WelcomeView>` and when rendering `<ImageUploadInput>` — to supply `selectedModel={model ?? DEFAULT_MODEL}`.
-- The `useAgentChat` hook itself does **not** apply a default — it sends `model: undefined` to the backend if no model is selected, letting SERA fall back to `PRIMARY_MODEL`.
+`app/actions/models.ts` exposes a single `"use server"` function:
 
-Helpers:
+```ts
+listModels(): Promise<ModelOption[]>
+```
 
-- `getModelByID(id)` — strict lookup; used to validate `localStorage["sera:lastModel"]`.
-- `getModelDisplayName(id)` — display string; falls back to the last `/`-separated segment of the id if unknown, or the raw id.
-- `groupModelsByProvider()` — groups by `label` (so OpenAI models read "ChatGPT" rather than "openai"), preserves insertion order. Returns `[label, ModelOption[]][]`.
+It calls `seraFetch("/models", { query: { enabled: "true" } })`, which attaches the user's NextAuth session cookie. Unauthenticated callers see `UnauthorizedError`. The result is cached only by SERA's Redis layer — SERAUI does not add its own cache; it relies on the page being re-rendered (server-side) per request and on SERA's 300s TTL absorbing the load.
 
-Persistence: the most recent model is mirrored to `localStorage["sera:lastModel"]` by `setModel`.
+### 12.4 Provider mount
+
+`app/(chat)/layout.tsx` is an async server component that calls `listModels()` and renders `<ModelCatalogProvider initialCatalog={catalog}>` around its client children. Other routes (e.g. `/api/auth/signin`) don't need the catalog, so the provider lives at the chat-route group rather than the root layout. `listModels()` is allowed to throw (unauthorized session, SERA unreachable, malformed response); the Next.js error boundary surfaces the failure. There is no silent fallback to an empty catalog — chat routes are only reachable after auth, so an authorization failure here is a real bug worth seeing.
+
+### 12.5 Consumers
+
+- **`<ModelSelector>`** — calls `useModelCatalog()`, builds `groupModelsByProvider(catalog)`, renders. Empty catalog renders a single disabled "No models available" item.
+- **`<SeraChat>`** — passes the active model spec straight through to `<ModelSelector>` without substitution. When `model` is `null` (nothing yet picked for this chat), the selector renders an explicit "Select a model" empty state rather than auto-displaying a placeholder spec.
+- **`useAgentChat`** — uses `getModelBySpec(catalog, stored)` to decide whether to restore `localStorage["sera:lastModel"]` (entries can disappear from the catalog between sessions).
+
+### 12.6 Pure helpers in `app/lib/models.ts`
+
+All take an explicit `models: readonly ModelOption[]` argument and have no module-level state, so they're trivial to test and safe for both server and client:
+
+- `getModelBySpec(models, spec)` — strict lookup; returns `undefined` if absent.
+- `getModelDisplayName(models, spec)` — returns the `displayName` of the matching row, or `null` if the spec is not in the catalog. Callers must explicitly handle `null` (no synthesized display string from the raw spec).
+- `groupModelsByProvider(models)` — returns `[provider, ModelOption[]][]` keyed by the raw `provider` field from the catalog, preserving catalog insertion order.
+
+There is no exported default model. The selector accepts `string | null`; absence is a real state the UI handles explicitly. The backend resolves `PRIMARY_MODEL` server-side when `body.model` is `undefined`, but that resolution is invisible to SERAUI — SERAUI does not pre-fill or guess a spec on the user's behalf.
+
+### 12.7 Persistence
+
+The most recent model spec is mirrored to `localStorage["sera:lastModel"]` by `setModel` in `useAgentChat`. On mount, `useAgentChat` validates the stored spec against the live catalog and discards it if it's no longer present.
 
 ---
 

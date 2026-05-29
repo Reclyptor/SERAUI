@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { Attachment, Message } from "@/app/actions/chat";
-import { getModelByID } from "@/app/lib/models";
+import { getModelBySpec } from "@/app/lib/models";
+import { useModelCatalog } from "@/app/contexts/ModelCatalogContext";
 import {
   buildStreamURL,
   emptyStreamState,
@@ -109,10 +110,18 @@ export function useAgentChat(
 
   const prevChatIDRef = useRef(options.chatID);
 
+  const catalog = useModelCatalog();
+  // Read the catalog through a ref inside the localStorage-restore effect so
+  // the effect's identity tracks only `options.initialModel`. Otherwise
+  // catalog-identity churn (e.g. layout re-render after navigation) would
+  // re-fire the restore and clobber whatever the user picked since mount.
+  const catalogRef = useRef(catalog);
+  catalogRef.current = catalog;
+
   useEffect(() => {
     if (!options.initialModel) {
       const stored = localStorage.getItem("sera:lastModel");
-      if (stored && getModelByID(stored)) {
+      if (stored && getModelBySpec(catalogRef.current, stored)) {
         setModelState(stored);
       } else if (stored) {
         localStorage.removeItem("sera:lastModel");
