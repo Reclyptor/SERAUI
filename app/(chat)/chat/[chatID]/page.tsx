@@ -21,6 +21,7 @@ export default async function ChatPage({
       chatID={chat._id}
       initialMessages={chat.messages}
       initialModel={chat.model}
+      initialAgentID={chat.agentID}
     />
   );
 }

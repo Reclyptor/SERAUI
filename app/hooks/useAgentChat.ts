@@ -27,6 +27,7 @@ interface UseAgentChatOptions {
   chatID?: string | null;
   threadID?: string;
   initialModel?: string;
+  initialAgentID?: string;
 }
 
 interface UseAgentChatReturn {
@@ -37,6 +38,8 @@ interface UseAgentChatReturn {
   runID: string | null;
   model: string | null;
   setModel: (model: string) => void;
+  agentID: string | null;
+  setAgentID: (agentID: string | null) => void;
   sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   stopGeneration: () => void;
   queue: string[];
@@ -68,6 +71,9 @@ export function useAgentChat(
   const [runID, setRunID] = useState<string | null>(null);
   const [model, setModelState] = useState<string | null>(
     options.initialModel ?? null,
+  );
+  const [agentID, setAgentIDState] = useState<string | null>(
+    options.initialAgentID ?? null,
   );
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [pendingConfirmations, setPendingConfirmations] = useState<
@@ -114,9 +120,25 @@ export function useAgentChat(
     }
   }, [options.initialModel]);
 
+  useEffect(() => {
+    if (!options.initialAgentID) {
+      const stored = localStorage.getItem("sera:lastAgentID");
+      if (stored) setAgentIDState(stored);
+    }
+  }, [options.initialAgentID]);
+
   const setModel = useCallback((value: string) => {
     setModelState(value);
     localStorage.setItem("sera:lastModel", value);
+  }, []);
+
+  const setAgentID = useCallback((value: string | null) => {
+    setAgentIDState(value);
+    if (value) {
+      localStorage.setItem("sera:lastAgentID", value);
+    } else {
+      localStorage.removeItem("sera:lastAgentID");
+    }
   }, []);
 
   const closeStream = useCallback(() => {
@@ -185,6 +207,9 @@ export function useAgentChat(
 
     if (o.initialModel) {
       setModelState(o.initialModel);
+    }
+    if (o.initialAgentID !== undefined) {
+      setAgentIDState(o.initialAgentID ?? null);
     }
   }, [options.chatID, cleanup]);
 
@@ -355,6 +380,7 @@ export function useAgentChat(
             chatID: chatID ?? undefined,
             threadID: threadID ?? undefined,
             model: model ?? undefined,
+            agentID: agentID ?? undefined,
           }),
           signal: abortController.signal,
         });
@@ -391,7 +417,7 @@ export function useAgentChat(
         setIsLoading(false);
       }
     },
-    [chatID, threadID, model, cleanup, subscribeToStream],
+    [chatID, threadID, model, agentID, cleanup, subscribeToStream],
   );
 
   // Check for an active run on mount (handles page refresh mid-stream)
@@ -483,6 +509,8 @@ export function useAgentChat(
     runID,
     model,
     setModel,
+    agentID,
+    setAgentID,
     sendMessage,
     stopGeneration,
     queue: queue.map((item) => item.content),

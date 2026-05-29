@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ImageIcon, SendIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
+import { AgentSelector } from "../AgentSelector";
 import { IconButton } from "../IconButton";
 import { ChatInputTextarea } from "../ChatInputTextarea";
 
@@ -10,12 +11,16 @@ interface WelcomeViewProps {
   onSend: (message: string) => void;
   selectedModel: string;
   onModelChange: (modelId: string) => void;
+  selectedAgentID: string | null;
+  onAgentChange: (agentID: string | null) => void;
 }
 
 export function WelcomeView({
   onSend,
   selectedModel,
   onModelChange,
+  selectedAgentID,
+  onAgentChange,
 }: WelcomeViewProps) {
   const [message, setMessage] = useState("");
 
@@ -56,6 +61,10 @@ export function WelcomeView({
               <ModelSelector
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
+              />
+              <AgentSelector
+                selectedAgentID={selectedAgentID}
+                onAgentChange={onAgentChange}
               />
             </div>
 

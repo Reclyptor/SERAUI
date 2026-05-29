@@ -45,6 +45,7 @@ export interface Chat {
   userID: string;
   title: string;
   model?: string;
+  agentID?: string;
   messages: Message[];
   createdAt: string;
   updatedAt: string;
@@ -55,6 +56,7 @@ export interface ChatListItem {
   userID: string;
   title: string;
   model?: string;
+  agentID?: string;
   createdAt: string;
   updatedAt: string;
 }

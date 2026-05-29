@@ -14,12 +14,14 @@ interface SeraChatProps {
   chatID: string | null;
   initialMessages: Message[];
   initialModel?: string;
+  initialAgentID?: string;
 }
 
 export function SeraChat({
   chatID,
   initialMessages,
   initialModel,
+  initialAgentID,
 }: SeraChatProps) {
   const { refreshChats } = useChat();
   const {
@@ -34,10 +36,13 @@ export function SeraChat({
     resolveConfirmation,
     model,
     setModel,
+    agentID,
+    setAgentID,
   } = useAgentChat({
     initialMessages,
     chatID,
     initialModel,
+    initialAgentID,
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -71,6 +76,8 @@ export function SeraChat({
           onSend={sendMessage}
           selectedModel={model ?? DEFAULT_MODEL}
           onModelChange={setModel}
+          selectedAgentID={agentID}
+          onAgentChange={setAgentID}
         />
       </div>
     );
@@ -128,6 +135,8 @@ export function SeraChat({
           onDismissFromQueue={dismissFromQueue}
           selectedModel={model ?? DEFAULT_MODEL}
           onModelChange={setModel}
+          selectedAgentID={agentID}
+          onAgentChange={setAgentID}
         />
       </div>
     </div>

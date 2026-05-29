@@ -6,6 +6,7 @@ import { useImageCache } from "../../contexts/ImageCacheContext";
 import { ImageThumbnail } from "../ImageThumbnail";
 import { ImageIcon, SendIcon, StopIcon } from "../Icons";
 import { ModelSelector } from "../ModelSelector";
+import { AgentSelector } from "../AgentSelector";
 import { IconButton } from "../IconButton";
 import { ChatInputTextarea } from "../ChatInputTextarea";
 import { uploadAttachment, type Attachment } from "@/app/actions/chat";
@@ -20,6 +21,8 @@ interface ImageUploadInputProps {
   onDismissFromQueue: (index: number) => void;
   selectedModel: string;
   onModelChange: (modelId: string) => void;
+  selectedAgentID: string | null;
+  onAgentChange: (agentID: string | null) => void;
 }
 
 export function ImageUploadInput({
@@ -30,6 +33,8 @@ export function ImageUploadInput({
   onDismissFromQueue,
   selectedModel,
   onModelChange,
+  selectedAgentID,
+  onAgentChange,
 }: ImageUploadInputProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<
@@ -251,6 +256,11 @@ export function ImageUploadInput({
             <ModelSelector
               selectedModel={selectedModel}
               onModelChange={onModelChange}
+              disabled={inProgress}
+            />
+            <AgentSelector
+              selectedAgentID={selectedAgentID}
+              onAgentChange={onAgentChange}
               disabled={inProgress}
             />
           </div>

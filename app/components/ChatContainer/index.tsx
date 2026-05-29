@@ -8,12 +8,14 @@ interface ChatContainerProps {
   chatID: string | null;
   initialMessages: Message[];
   initialModel?: string;
+  initialAgentID?: string;
 }
 
 export function ChatContainer({
   chatID,
   initialMessages,
   initialModel,
+  initialAgentID,
 }: ChatContainerProps) {
   const { sessionId } = useChat();
 
@@ -25,6 +27,7 @@ export function ChatContainer({
           chatID={chatID}
           initialMessages={initialMessages}
           initialModel={initialModel}
+          initialAgentID={initialAgentID}
         />
       </div>
     </div>
