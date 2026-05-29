@@ -230,6 +230,78 @@ describe("reduceAgentEvent — confirmations", () => {
     s = reduce(s, event("confirmation.resolved", {}));
     expect(s.confirmations).toEqual([]);
   });
+
+  it("appends approval.requested (tool-layer) the same as confirmation.required", () => {
+    const s = reduce(
+      emptyStreamState(),
+      event(
+        "approval.requested",
+        {
+          confirmationID: "approve-1",
+          actionName: "cluster_git.write_file",
+          args: { path: "apps/x.yaml" },
+          message: "Approval required to commit apps/x.yaml",
+        },
+        { threadID: "thread-42" },
+      ),
+    );
+    expect(s.confirmations).toEqual([
+      {
+        confirmationID: "approve-1",
+        actionName: "cluster_git.write_file",
+        args: { path: "apps/x.yaml" },
+        message: "Approval required to commit apps/x.yaml",
+        threadID: "thread-42",
+      },
+    ]);
+  });
+
+  it("removes the matching id on approval.resolved", () => {
+    let s = emptyStreamState();
+    s = reduce(s, event("approval.requested", { confirmationID: "k1" }));
+    s = reduce(s, event("approval.resolved", { confirmationID: "k1" }));
+    expect(s.confirmations).toEqual([]);
+  });
+
+  it("removes the matching id on approval.expired", () => {
+    let s = emptyStreamState();
+    s = reduce(s, event("approval.requested", { confirmationID: "k2" }));
+    s = reduce(s, event("approval.expired", { confirmationID: "k2" }));
+    expect(s.confirmations).toEqual([]);
+  });
+
+  it("dedupes when both confirmation.required and approval.requested fire for the same id", () => {
+    // Defensive: backend currently fires only one channel on insert, but
+    // SPEC §12 leaves the unified-store open to both emitting. Reducer
+    // must not show the same prompt twice.
+    let s = emptyStreamState();
+    s = reduce(
+      s,
+      event("confirmation.required", {
+        confirmationID: "shared",
+        actionName: "exec",
+        message: "approve?",
+      }),
+    );
+    s = reduce(
+      s,
+      event("approval.requested", {
+        confirmationID: "shared",
+        actionName: "exec",
+        message: "approve?",
+      }),
+    );
+    expect(s.confirmations).toHaveLength(1);
+    expect(s.confirmations[0].confirmationID).toBe("shared");
+  });
+
+  it("tolerates the paired confirmation.resolved + approval.resolved that the backend fires on transition", () => {
+    let s = emptyStreamState();
+    s = reduce(s, event("approval.requested", { confirmationID: "x" }));
+    s = reduce(s, event("confirmation.resolved", { confirmationID: "x" }));
+    s = reduce(s, event("approval.resolved", { confirmationID: "x" }));
+    expect(s.confirmations).toEqual([]);
+  });
 });
 
 describe("reduceAgentEvent — tool calls", () => {

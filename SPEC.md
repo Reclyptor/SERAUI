@@ -889,7 +889,10 @@ SSE comment lines (`: ping <epoch>\n\n`) sent by SERA every 15s during idle stre
 | `run.failed`            | Captured for replay flush | If the assistant has no content, writes `Error: <error>` as the content; clears `isLoading`; closes.             |
 | `run.cancelled`         | Captured for replay flush | If the assistant has no content, writes the cancellation reason or `Run cancelled.`; clears `isLoading`; closes. |
 | `confirmation.required` | Yes                       | Pushes onto `pendingConfirmations` (or `replayConfirmationsRef` during replay).                                  |
+| `approval.requested`    | Yes                       | Alias for `confirmation.required` — tool-layer gating (`exec`, `shell`, `process`, `code_execution`, `cluster_git`, `kubectl`) fires this against the same durable confirmation store. Reducer dedupes by `confirmationID` if both channels emit. |
 | `confirmation.resolved` | Yes                       | Removes the matching confirmation entry.                                                                         |
+| `approval.resolved`     | Yes                       | Alias for `confirmation.resolved` — the backend fires both on a transition (SERA SPEC §12), so the reducer is idempotent on missing IDs. |
+| `approval.expired`      | Yes                       | Tool-layer approval timed out; remove the matching entry like `confirmation.resolved`.                           |
 | `tool_call.started`     | Yes                       | Appends a `ToolCallBlock { status: "started" }` to the assistant's `toolCalls`.                                  |
 | `tool_call.executing`   | Yes                       | Flips that tool call's `status` to `"executing"`.                                                                |
 | `tool_call.result`      | Yes                       | Sets `status: "completed"` and stores `result`.                                                                  |

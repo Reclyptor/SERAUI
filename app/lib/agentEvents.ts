@@ -146,10 +146,22 @@ export function reduceAgentEvent(
       };
     }
 
-    case "confirmation.required": {
+    // Action-layer pauses (`request_confirmation`, `delete_memory`, …) emit
+    // `confirmation.required` / `confirmation.resolved`. Tool-layer gating
+    // (`exec`, `shell`, `process`, `code_execution`, `cluster_git`, `kubectl`)
+    // emits `approval.requested` / `approval.resolved` / `approval.expired`
+    // against the same durable confirmation store, so both channels drive
+    // the same pending list. See SERA SPEC §12.
+    case "confirmation.required":
+    case "approval.requested": {
       const confirmationID =
         typeof data.confirmationID === "string" ? data.confirmationID : "";
       if (!confirmationID) return state;
+      if (
+        state.confirmations.some((c) => c.confirmationID === confirmationID)
+      ) {
+        return state;
+      }
       const entry: PendingConfirmation = {
         confirmationID,
         actionName:
@@ -164,7 +176,9 @@ export function reduceAgentEvent(
       };
     }
 
-    case "confirmation.resolved": {
+    case "confirmation.resolved":
+    case "approval.resolved":
+    case "approval.expired": {
       const confirmationID =
         typeof data.confirmationID === "string" ? data.confirmationID : "";
       if (!confirmationID) return state;
