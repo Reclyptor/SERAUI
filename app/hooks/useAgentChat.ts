@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { Attachment, Message } from "@/app/actions/chat";
+import { resolveConfirmation as resolveConfirmationAction } from "@/app/actions/confirmations";
 import { getModelBySpec } from "@/app/lib/models";
 import { useModelCatalog } from "@/app/contexts/ModelCatalogContext";
 import {
@@ -474,18 +475,13 @@ export function useAgentChat(
       if (!confirmation) return;
 
       try {
-        const res = await fetch(
-          `${API_BASE}/confirm/${confirmation.threadID}/${confirmationID}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ approved, feedback }),
-          },
+        const result = await resolveConfirmationAction(
+          confirmation.threadID,
+          confirmationID,
+          approved,
+          feedback,
         );
-        const data = (await res.json().catch(() => null)) as {
-          resolved?: boolean;
-        } | null;
-        if (res.ok && data?.resolved) {
+        if (result.resolved) {
           setPendingConfirmations((prev) =>
             prev.filter((c) => c.confirmationID !== confirmationID),
           );
